@@ -203,7 +203,7 @@ with tab_master:
     st.markdown("---")
     st.subheader("Alternative: Add Single Motor Asset Manually")
     
-    # Clean, linear vertical container layout to guarantee visibility on any display setting
-    with st.form("manual_entry_form", clear_on_submit=True):
-        area_input = st.text_input("Area / Shop / Zone Location (e.g., Fce #2, Raw Mill)")
-        eq = st.text_input("Equipment (e.g., Air Compressor)")
+    # We stripped out the st.form block right here.
+    # This prevents the app from creating a locked, height-restricted container box.
+    area_input = st.text_input("Area / Shop / Zone Location (e.g., Fce #2, Raw Mill)", key="man_area")
+    eq = st.text_input("Equipment (e.g., Air Compressor)", key="man_eq")
