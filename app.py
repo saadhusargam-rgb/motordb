@@ -94,14 +94,14 @@ with tab_view:
         return [''] * len(series)
         
     if not filtered_df.empty:
-        display_cols = [c for col in ["area", "equipment", "drive", "matcode", "qty", "kw/hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"] if (c:=col) in filtered_df.columns]
+        display_cols = [c for col in ["id", "area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"] if (c:=col) in filtered_df.columns]
         
         formatted_styled_df = (
             filtered_df[display_cols]
             .style.apply(highlight_status_column, axis=0)
             .format({
                 "matcode": safe_decimal_formatter,
-                "kw/hp": safe_decimal_formatter,
+                "kw_hp": safe_decimal_formatter,
                 "current": safe_decimal_formatter
             })
         )
@@ -142,7 +142,8 @@ with tab_update:
                 if "selector_label" in df_motors.columns:
                     df_motors = df_motors.drop(columns=["selector_label"])
                 
-                conn.update(worksheet="Sheet1", data=df_motors)
+                # FIXED: Writes back cleanly targeting default worksheets natively
+                conn.update(data=df_motors)
                 st.success("✅ Change committed! Google Sheet updated in real time.")
                 st.rerun()
 
@@ -183,7 +184,6 @@ with tab_master:
                 kw_val = sanitize_digits(kw_in, max_digits=6)
                 rpm_val = sanitize_digits(rpm_in, max_digits=5)
                 
-                # FIX: Clean multi-line mapping dictionary resolves the compilation brackets drop crash
                 row_data = {
                     "area": area_input,
                     "equipment": eq,
