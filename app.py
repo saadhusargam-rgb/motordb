@@ -32,7 +32,7 @@ def init_database():
         )
     """)
     cursor.execute("PRAGMA table_info(motor_registry)")
-    columns = [row[1] for row in cursor.fetchall()]
+    columns = [row for row in cursor.fetchall()]
     if "area" not in columns:
         cursor.execute("ALTER TABLE motor_registry ADD COLUMN area TEXT")
     conn.commit()
@@ -86,7 +86,6 @@ with tab_view:
     with export_col1:
         st.subheader("Quick Search Filter")
     with export_col2:
-        # Export button will always render cleanly, even with zero records
         excel_data = convert_df_to_excel(df_motors)
         st.download_button(
             label="📥 Export to Excel",
@@ -139,7 +138,7 @@ with tab_update:
         df_motors["selector_label"] = "ID " + df_motors["id"].astype(str) + " | Loc: " + df_motors["area"].astype(str) + " | " + df_motors["equipment"].astype(str) + " (" + df_motors["drive"].astype(str) + ")"
         selected_motor_label = st.selectbox("Select Target Motor to Modify:", df_motors["selector_label"].tolist())
         
-        selected_row = df_motors[df_motors["selector_label"] == selected_motor_label].iloc[0]
+        selected_row = df_motors[df_motors["selector_label"] == selected_motor_label].iloc
         m_id = int(selected_row["id"])
         
         st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
@@ -204,7 +203,7 @@ with tab_master:
     st.markdown("---")
     st.subheader("Alternative: Add Single Motor Asset Manually")
     
+    # Clean, linear vertical container layout to guarantee visibility on any display setting
     with st.form("manual_entry_form", clear_on_submit=True):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            area_input = st.text_input("Area / Shop / Zone Location (e.g., Fce #2, Raw Mill)")
+        area_input = st.text_input("Area / Shop / Zone Location (e.g., Fce #2, Raw Mill)")
+        eq = st.text_input("Equipment (e.g., Air Compressor)")
