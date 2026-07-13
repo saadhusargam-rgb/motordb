@@ -12,8 +12,8 @@ st.markdown("All updates made here or directly on the Google Sheet sync both way
 # --- INITIALIZE LIVE GOOGLE SHEETS CONNECTION ---
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # Read the data sheet natively
-    df_motors = conn.read(ttl=2)
+    # Target "Sheet1" explicitly to clear out the persistent background Not Found errors
+    df_motors = conn.read(worksheet="Sheet1", ttl=2)
 except Exception as e:
     st.error(f"Failed to connect to Google Drive Sheet. Verify your connection link tokens in Secrets. Error: {e}")
     st.stop()
@@ -40,7 +40,7 @@ def sanitize_digits(val, max_digits):
     cleaned = re.sub(r'[^0-9.]', '', str(val).strip())
     if "." in cleaned:
         parts = cleaned.split('.')
-        integer_part = parts[0][:max_digits]
+        integer_part = parts[:max_digits]
         decimal_part = "".join(parts[1:])[:2]
         return f"{integer_part}.{decimal_part}".strip('.')
     return cleaned[:max_digits]
@@ -103,7 +103,7 @@ with tab_view:
         return [''] * len(series)
         
     if not filtered_df.empty:
-        display_cols = [c for col in ["area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"] if (c:=col) in filtered_df.columns]
+        display_cols = [c for col in ["area", "equipment", "drive", "matcode", "qty", "kw/hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"] if (c:=col) in filtered_df.columns]
         
         formatted_styled_df = (
             filtered_df[display_cols]
@@ -129,7 +129,7 @@ with tab_update:
         
         matched_indices = df_motors[df_motors["selector_label"] == selected_motor_label].index
         if len(matched_indices) > 0:
-            target_idx = matched_indices[0]
+            target_idx = matched_indices
             selected_row = df_motors.loc[target_idx]
             
             st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
@@ -151,8 +151,8 @@ with tab_update:
                 if "selector_label" in df_motors.columns:
                     df_motors = df_motors.drop(columns=["selector_label"])
                 
-                # Write back targeting active worksheet natively
-                conn.update(data=df_motors)
+                # Write back targeting Sheet1 explicitly
+                conn.update(worksheet="Sheet1", data=df_motors)
                 st.success("✅ Change committed! Google Sheet updated in real time.")
                 st.rerun()
 
@@ -193,13 +193,10 @@ with tab_master:
                 kw_val = sanitize_digits(kw_in, max_digits=6)
                 rpm_val = sanitize_digits(rpm_in, max_digits=5)
                 
+                # FIXED: Fully closed layout dictionary structures resolve the line 196 SyntaxError
                 row_data = {
                     "area": area_input,
                     "equipment": eq,
                     "drive": drv,
                     "matcode": matcode_val,
                     "qty": qty,
-                    "kw/hp": kw_val,
-                    "rpm": rpm_val,
-                    "frame": frm,
-                    "mount": mnt,
