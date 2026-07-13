@@ -211,7 +211,7 @@ with tab_update:
         
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
-            # FIX: Added [0] index accessor to extract the correct single row dictionary map
+            # FIX: Added [0] row positioning indicator to prevent inner compilation crash loops
             selected_row = matched_rows.iloc[0]
             m_id = int(selected_row["id"])
             m_area = str(selected_row["area"])
