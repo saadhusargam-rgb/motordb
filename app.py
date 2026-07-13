@@ -69,26 +69,21 @@ def convert_df_to_excel(df):
 
 # --- DATA CLEANING & CONSTRAINT UTILITIES ---
 def clean_to_numeric_string(val):
-    """Strips all non-numeric characters except decimal points."""
     if pd.isna(val) or val is None:
         return ""
     cleaned = re.sub(r'[^0-9.]', '', str(val))
-    # Handle edge cases where multiple decimals might exist accidentally
     if cleaned.count('.') > 1:
         parts = cleaned.split('.')
         cleaned = parts[0] + '.' + ''.join(parts[1:])
     return cleaned
 
 def enforce_float_limit(val, max_digits):
-    """Converts value to a float and limits its total digit length."""
     cleaned_str = clean_to_numeric_string(val)
     if not cleaned_str or cleaned_str == ".":
         return None
-    # Truncate string to match maximum digit allowance safely before conversion
     no_dot = cleaned_str.replace('.', '')[:max_digits]
     if '.' in cleaned_str:
         dot_idx = cleaned_str.index('.')
-        # Re-insert dot relative to truncation window position layout
         integer_part = cleaned_str[:dot_idx][:max_digits]
         decimal_part = cleaned_str[dot_idx+1:][:(max_digits - len(integer_part))]
         final_str = f"{integer_part}.{decimal_part}".strip('.')
@@ -100,9 +95,7 @@ def enforce_float_limit(val, max_digits):
         return None
 
 def enforce_int_limit(val, max_digits):
-    """Converts value to an integer and limits its total digit length."""
     cleaned_str = clean_to_numeric_string(val)
-    # Split at decimal point if an float somehow makes it into an integer column row
     clean_int_str = cleaned_str.split('.')[0][:max_digits]
     try:
         return int(clean_int_str) if clean_int_str else None
@@ -164,7 +157,20 @@ with tab_view:
         
     if not filtered_df.empty:
         display_cols = ["id", "area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
-        st.dataframe(filtered_df[display_cols].style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
+        
+        # --- CRITICAL LAYOUT FIX FOR TWO DECIMAL PLACES DISPLAY ---
+        # This formats matcode, kw_hp, and current to always render with exactly two decimals (.2f)
+        formatted_styled_df = (
+            filtered_df[display_cols]
+            .style.apply(highlight_status, axis=1)
+            .format({
+                "matcode": "{:.2f}",
+                "kw_hp": "{:.2f}",
+                "current": "{:.2f}"
+            }, na_rep="")
+        )
+        
+        st.dataframe(formatted_styled_df, use_container_width=True, hide_index=True)
     else:
         st.info("No records found in database registry. Please add entries in the Master Data Entry tab.")
 
@@ -226,3 +232,4 @@ with tab_master:
             
             for index, row in excel_df.iterrows():
                 area_val = str(row.get("Area", row.get("area", ""))).strip()
+                eq_val = str(row.get("Equipment", row.get("equipment", ""))).strip()
