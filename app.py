@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import io
 
 # --- DATABASE MANAGEMENT FUNCTIONS ---
 def get_db_connection():
@@ -55,6 +56,19 @@ def update_motor_status(motor_id, field_name, new_value):
     conn.commit()
     conn.close()
 
+# --- HELPER FUNCTION FOR EXCEL EXPORT ---
+def convert_df_to_excel(df):
+    # Create an in-memory buffer to store the Excel file bytes safely
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        # Drop internal helper columns if they exist before exporting
+        export_df = df.copy()
+        if "selector_label" in export_df.columns:
+            export_df = export_df.drop(columns=["selector_label"])
+        
+        export_df.to_excel(writer, index=False, sheet_name='Motor Registry')
+    return buffer.getvalue()
+
 # --- APP LAYOUT CONFIGURATION ---
 st.set_page_config(page_title="Motor Database Manager", layout="wide")
 init_database()
@@ -67,9 +81,23 @@ tab_view, tab_update, tab_master = st.tabs(["🔍 Search & View", "⚙️ Field 
 
 # ==================== TAB 1: EASY SEARCH & VIEW ====================
 with tab_view:
-    st.subheader("Quick Search Filter")
+    # --- BULK EXCEL EXPORT WIDGET ---
+    export_col1, export_col2 = st.columns([4, 1])
+    with export_col1:
+        st.subheader("Quick Search Filter")
+    with export_col2:
+        if not df_motors.empty:
+            # Generate the Excel data bytes
+            excel_data = convert_df_to_excel(df_motors)
+            st.download_button(
+                label="📥 Export to Excel",
+                data=excel_data,
+                file_name="motor_registry_export.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
     search_col1, search_col2 = st.columns(2)
-    
     with search_col1:
         equipment_filter = st.selectbox("Filter by Equipment Type:", ["All"] + sorted(list(df_motors["equipment"].dropna().unique())))
     with search_col2:
@@ -106,7 +134,7 @@ with tab_update:
         df_motors["selector_label"] = "ID " + df_motors["id"].astype(str) + " | " + df_motors["equipment"].astype(str) + " (" + df_motors["drive"].astype(str) + ")"
         selected_motor_label = st.selectbox("Select Target Motor to Modify:", df_motors["selector_label"].tolist())
         
-        selected_row = df_motors[df_motors["selector_label"] == selected_motor_label].iloc[0]
+        selected_row = df_motors[df_motors["selector_label"] == selected_motor_label].iloc
         m_id = int(selected_row["id"])
         
         st.info(f"📍 Modifying: {selected_row['equipment']} - {selected_row['drive']}")
@@ -131,29 +159,58 @@ with tab_update:
 
 # ==================== TAB 3: MASTER DATA ENTRY ====================
 with tab_master:
-    st.subheader("Add New Motor Asset to Master Database")
+    st.subheader("Bulk Import via Excel Spreadsheet (.xlsx)")
+    st.markdown("Ensure your Excel columns match these names: **Equipment, Drive, Matcode, Qty, kw/hp, rpm, frame, mount, current, coupling, remarks**")
+    
+    uploaded_excel = st.file_uploader("Upload Motor List Spreadsheet File", type=["xlsx"])
+    
+    if uploaded_excel is not None:
+        try:
+            excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
+            st.write("📊 Previewing Uploaded Excel Sheet Data Structure:")
+            st.dataframe(excel_df.head(3), use_container_width=True)
+            
+            if st.button("Confirm Bulk Import into SQLite Engine"):
+                conn = get_db_connection()
+                import_counter = 0
+                
+                for index, row in excel_df.iterrows():
+                    eq_val = str(row.get("Equipment", row.get("equipment", "Unknown")))
+                    drv_val = str(row.get("Drive", row.get("drive", "Unknown")))
+                    mat_val = str(row.get("Matcode", row.get("matcode", "")))
+                    qty_val = int(row.get("Qty", row.get("qty", 1)))
+                    kw_val = float(row.get("kw/hp", row.get("kw_hp", 0.0)))
+                    rpm_val = int(row.get("rpm", row.get("RPM", 1440)))
+                    frame_val = str(row.get("frame", row.get("Frame", "")))
+                    mount_val = str(row.get("mount", row.get("Mount", "foot")))
+                    curr_val = float(row.get("current", row.get("Current", 0.0)))
+                    nl_curr_val = float(row.get("no_load_current", 0.0))
+                    cpl_val = str(row.get("coupling", row.get("Coupling", "")))
+                    rem_val = str(row.get("remarks", row.get("Remarks", "Imported via Excel")))
+                    
+                    insert_motor((eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
+                    import_counter += 1
+                
+                st.success(f"🚀 Successfully imported {import_counter} motor records into your active ledger!")
+                st.rerun()
+                
+        except Exception as e:
+            st.error(f"Error parsing Excel file structural mappings: {e}")
+            
+    st.markdown("---")
+    st.subheader("Alternative: Add Single Motor Asset Manually")
     with st.form("master_entry_form", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            eq = st.text_input("Equipment (e.g., Air Compressor, Oil Pump)")
+            eq = st.text_input("Equipment (e.g., Air Compressor)")
             drv = st.text_input("Drive Name (e.g., Compressor motor west)")
             mat = st.text_input("Matcode")
             qty = st.number_input("Quantity", min_value=1, value=1, step=1)
         with c2:
             kw = st.number_input("Power Rating (kw/hp)", min_value=0.0, step=0.1, format="%.2f")
             rpm = st.number_input("RPM", min_value=0, value=1440, step=10)
-            frm = st.text_input("Frame Dimension Size (e.g., 160M, 225M)")
+            frm = st.text_input("Frame Dimension Size")
             mnt = st.selectbox("Mount Configuration Type", ["foot", "flange", "foot/flange"])
         with c3:
             curr = st.number_input("Full Load Current (Amps)", min_value=0.0, step=0.1, format="%.2f")
             nl_curr = st.number_input("No Load Current (Amps)", min_value=0.0, step=0.1, format="%.2f")
-            cpl = st.text_input("Coupling Details (e.g., pin bush, chain, bibby)")
-            rem = st.text_input("Initial Master Database Remarks")
-            
-        if st.form_submit_button("Commit Motor to Registry"):
-            if not eq or not drv:
-                st.error("Validation Error: 'Equipment' and 'Drive Name' are required fields.")
-            else:
-                insert_motor((eq, drv, mat, qty, kw, rpm, frm, mnt, curr, nl_curr, cpl, "Healthy", rem))
-                st.success(f"Successfully integrated '{drv}' into the system!")
-                st.rerun()
