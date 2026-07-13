@@ -12,13 +12,11 @@ st.markdown("All updates made here or directly on the Google Sheet sync both way
 # --- INITIALIZE LIVE GOOGLE SHEETS CONNECTION ---
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # Read all active rows from the linked Google Sheet
-    df_motors = conn.read(ttl=2) # ttl=2 forces cache to refresh every 2 seconds for live data
+    df_motors = conn.read(ttl=2)
 except Exception as e:
     st.error(f"Failed to connect to Google Drive Sheet. Verify your connection link tokens in Secrets. Error: {e}")
     st.stop()
 
-# Clean missing string rows upfront to prevent visual system grid crashes
 if not df_motors.empty:
     for col in df_motors.columns:
         df_motors[col] = df_motors[col].fillna("").astype(str).str.strip()
@@ -47,7 +45,6 @@ def safe_decimal_formatter(val):
     except (ValueError, TypeError):
         return str(val)
 
-# Navigation Layout View
 tab_view, tab_update, tab_master = st.tabs(["🔍 Search & View Live Fleet", "⚙️ Field Status Update", "🏗️ Add Single Motor Asset"])
 
 # ==================== TAB 1: LIVE SEARCH & VIEW ====================
@@ -97,15 +94,14 @@ with tab_view:
         return [''] * len(series)
         
     if not filtered_df.empty:
-        # Display the column headers beautifully matching Google Sheet fields
-        display_cols = [c for col in ["area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"] if (c:=col) in filtered_df.columns]
+        display_cols = [c for col in ["area", "equipment", "drive", "matcode", "qty", "kw/hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"] if (c:=col) in filtered_df.columns]
         
         formatted_styled_df = (
             filtered_df[display_cols]
             .style.apply(highlight_status_column, axis=0)
             .format({
                 "matcode": safe_decimal_formatter,
-                "kw_hp": safe_decimal_formatter,
+                "kw/hp": safe_decimal_formatter,
                 "current": safe_decimal_formatter
             })
         )
@@ -124,7 +120,7 @@ with tab_update:
         
         matched_indices = df_motors[df_motors["selector_label"] == selected_motor_label].index
         if len(matched_indices) > 0:
-            target_idx = matched_indices[0] # Safely pinpoint row placement location
+            target_idx = matched_indices[0]
             selected_row = df_motors.loc[target_idx]
             
             st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
@@ -140,15 +136,12 @@ with tab_update:
                 submit_status = st.form_submit_button("Submit & Write-Back to Google Drive")
                 
             if submit_status:
-                # Direct worksheet memory manipulation
                 df_motors.loc[target_idx, "status"] = new_status
                 df_motors.loc[target_idx, "remarks"] = new_remarks
                 
-                # Drop formatting helper column before saving back to cloud storage
                 if "selector_label" in df_motors.columns:
                     df_motors = df_motors.drop(columns=["selector_label"])
                 
-                # Write changes directly back to your live Google Sheet
                 conn.update(worksheet="Sheet1", data=df_motors)
                 st.success("✅ Change committed! Google Sheet updated in real time.")
                 st.rerun()
@@ -190,6 +183,23 @@ with tab_master:
                 kw_val = sanitize_digits(kw_in, max_digits=6)
                 rpm_val = sanitize_digits(rpm_in, max_digits=5)
                 
-                # Build append row dataframe token matching the Sheet structure precisely
-                new_row = pd.DataFrame([{
-                    "area": area_input, "equipment": eq, "drive": drv, "matcode": matcode_val,
+                # FIX: Clean multi-line mapping dictionary resolves the compilation brackets drop crash
+                row_data = {
+                    "area": area_input,
+                    "equipment": eq,
+                    "drive": drv,
+                    "matcode": matcode_val,
+                    "qty": qty,
+                    "kw/hp": kw_val,
+                    "rpm": rpm_val,
+                    "frame": frm,
+                    "mount": mnt,
+                    "current": current_val,
+                    "no_load_current": nl_curr,
+                    "coupling": cpl,
+                    "status": init_status,
+                    "remarks": rem
+                }
+                
+                new_row = pd.DataFrame([row_data])
+                
