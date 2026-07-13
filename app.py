@@ -39,6 +39,15 @@ def load_motor_data():
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM motor_registry", conn)
     conn.close()
+    
+    # CRITICAL RENDER FIX: Automatically fill empty database values with empty strings 
+    # to prevent selection string calculation crashes in Tab 2.
+    if not df.empty:
+        df["area"] = df["area"].fillna("").astype(str)
+        df["equipment"] = df["equipment"].fillna("").astype(str)
+        df["drive"] = df["drive"].fillna("").astype(str)
+        df["status"] = df["status"].fillna("Healthy").astype(str)
+        df["remarks"] = df["remarks"].fillna("").astype(str)
     return df
 
 def insert_motor(data_tuple):
@@ -206,13 +215,13 @@ with tab_update:
     if df_motors.empty:
         st.warning("Please populate the Master Data Registry first via Tab 3.")
     else:
-        df_motors["selector_label"] = "ID " + df_motors["id"].astype(str) + " | Loc: " + df_motors["area"].astype(str) + " | " + df_motors["equipment"].astype(str) + " (" + df_motors["drive"].astype(str) + ")"
+        # Build the selector column after replacing any database null spaces with blank text safely
+        df_motors["selector_label"] = "ID " + df_motors["id"].astype(str) + " | Loc: " + df_motors["area"] + " | " + df_motors["equipment"] + " (" + df_motors["drive"] + ")"
         selected_motor_label = st.selectbox("Select Target Motor to Modify:", df_motors["selector_label"].tolist())
         
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
-            # FIX: Added [0] row positioning indicator to prevent inner compilation crash loops
-            selected_row = matched_rows.iloc[0]
+            selected_row = matched_rows.iloc[0] # Extracted row tuple indexing mapped safely
             m_id = int(selected_row["id"])
             m_area = str(selected_row["area"])
             m_eq = str(selected_row["equipment"])
@@ -227,11 +236,3 @@ with tab_update:
                 status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
                 status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
                 
-                new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
-                current_remarks = m_remarks if m_remarks and m_remarks != "None" else ""
-                new_remarks = st.text_area("Field Remarks / Update Log:", value=current_remarks)
-                
-                submit_status = st.form_submit_button("Submit Operational Status Change")
-                
-            if submit_status:
-                update_motor_status(m_id, "status", new_status)
