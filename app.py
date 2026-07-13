@@ -164,10 +164,7 @@ with tab_view:
         
     st.markdown(f"**Showing {len(filtered_df)} Matching Motors**")
     
-    # --- FIXED: STATUS-ONLY COLUMN STYLING FUNCTION ---
     def highlight_status_column(series):
-        """Applies backgrounds exclusively to cells in the 'status' column string list selection."""
-        # Check if the current processing series is the status column
         if series.name == 'status':
             styles = []
             for val in series:
@@ -185,16 +182,14 @@ with tab_view:
                 else:
                     styles.append('')
             return styles
-        else:
-            # Leave all other columns blank/default white background color
-            return [''] * len(series)
+        return [''] * len(series)
         
     if not filtered_df.empty:
         display_cols = ["id", "area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
         
         formatted_styled_df = (
             filtered_df[display_cols]
-            .style.apply(highlight_status_column, axis=0) # Axis=0 evaluates column-by-column rather than row-by-row
+            .style.apply(highlight_status_column, axis=0)
             .format({
                 "matcode": safe_decimal_formatter,
                 "kw_hp": safe_decimal_formatter,
@@ -216,7 +211,7 @@ with tab_update:
         
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
-            selected_row = matched_rows.iloc
+            selected_row = matched_rows.iloc[0]
             m_id = int(selected_row["id"])
             m_area = str(selected_row["area"])
             m_eq = str(selected_row["equipment"])
@@ -226,11 +221,18 @@ with tab_update:
             
             st.info(f"📍 Modifying: Area {m_area} -> {m_eq} ({m_drv})")
             
+            # Form layout handles fields vertically to guarantee clear formatting properties
             with st.form("status_update_form"):
-                up_col1, up_col2 = st.columns(2)
-                with up_col1:
-                    current_status = m_status if m_status and m_status != "None" and m_status != "" else "Healthy"
-                    status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
-                    status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
-                    new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
-                with up_col2:
+                current_status = m_status if m_status and m_status != "None" and m_status != "" else "Healthy"
+                status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
+                status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
+                
+                new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
+                
+                current_remarks = m_remarks if m_remarks and m_remarks != "None" else ""
+                new_remarks = st.text_area("Field Remarks / Update Log:", value=current_remarks)
+                
+                submit_status = st.form_submit_button("Submit Operational Status Change")
+                
+            if submit_status:
+                update_motor_status(m_id, "status", new_status)
