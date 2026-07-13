@@ -164,26 +164,37 @@ with tab_view:
         
     st.markdown(f"**Showing {len(filtered_df)} Matching Motors**")
     
-    def highlight_operational_status(row):
-        status = str(row['status']).strip()
-        if status == 'Healthy':
-            return ['background-color: #d4edda; color: #155724;'] * len(row)
-        elif status == 'Under Observation':
-            return ['background-color: #d1ecf1; color: #0c5460;'] * len(row)
-        elif status == 'Under Maintenance':
-            return ['background-color: #fff3cd; color: #856404;'] * len(row)
-        elif status == 'Breakdown':
-            return ['background-color: #f8d7da; color: #721c24; font-weight: bold;'] * len(row)
-        elif status == 'Spare/Scrapped':
-            return ['background-color: #e2e3e5; color: #383d41;'] * len(row)
-        return [''] * len(row)
+    # --- FIXED: STATUS-ONLY COLUMN STYLING FUNCTION ---
+    def highlight_status_column(series):
+        """Applies backgrounds exclusively to cells in the 'status' column string list selection."""
+        # Check if the current processing series is the status column
+        if series.name == 'status':
+            styles = []
+            for val in series:
+                status = str(val).strip()
+                if status == 'Healthy':
+                    styles.append('background-color: #d4edda; color: #155724;')
+                elif status == 'Under Observation':
+                    styles.append('background-color: #d1ecf1; color: #0c5460;')
+                elif status == 'Under Maintenance':
+                    styles.append('background-color: #fff3cd; color: #856404;')
+                elif status == 'Breakdown':
+                    styles.append('background-color: #f8d7da; color: #721c24; font-weight: bold;')
+                elif status == 'Spare/Scrapped':
+                    styles.append('background-color: #e2e3e5; color: #383d41;')
+                else:
+                    styles.append('')
+            return styles
+        else:
+            # Leave all other columns blank/default white background color
+            return [''] * len(series)
         
     if not filtered_df.empty:
         display_cols = ["id", "area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
         
         formatted_styled_df = (
             filtered_df[display_cols]
-            .style.apply(highlight_operational_status, axis=1)
+            .style.apply(highlight_status_column, axis=0) # Axis=0 evaluates column-by-column rather than row-by-row
             .format({
                 "matcode": safe_decimal_formatter,
                 "kw_hp": safe_decimal_formatter,
@@ -205,7 +216,7 @@ with tab_update:
         
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
-            selected_row = matched_rows.iloc[0] # Extracted cleanly as an array object sequence row slice reference
+            selected_row = matched_rows.iloc
             m_id = int(selected_row["id"])
             m_area = str(selected_row["area"])
             m_eq = str(selected_row["equipment"])
@@ -215,7 +226,6 @@ with tab_update:
             
             st.info(f"📍 Modifying: Area {m_area} -> {m_eq} ({m_drv})")
             
-            # --- CLEANED STRIPPED SPACING FORM SUBMIT LAYER ---
             with st.form("status_update_form"):
                 up_col1, up_col2 = st.columns(2)
                 with up_col1:
@@ -224,11 +234,3 @@ with tab_update:
                     status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
                     new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
                 with up_col2:
-                    current_remarks = m_remarks if m_remarks and m_remarks != "None" else ""
-                    new_remarks = st.text_area("Field Remarks / Update Log:", value=current_remarks)
-                
-                submit_status = st.form_submit_button("Submit Operational Status Change")
-                
-            if submit_status:
-                update_motor_status(m_id, "status", new_status)
-                update_motor_status(m_id, "remarks", new_remarks)
