@@ -168,8 +168,7 @@ with tab_master:
         try:
             excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
             
-            # --- CRITICAL BUG FIX FOR BLANK EXCEL CELLS ---
-            # Replace empty/missing cells dynamically to ensure math parsing won't crash
+            # Clean missing spreadsheet inputs automatically
             for col in excel_df.columns:
                 if col.lower() in ['qty', 'quantity']:
                     excel_df[col] = pd.to_numeric(excel_df[col], errors='coerce').fillna(1)
@@ -188,7 +187,6 @@ with tab_master:
                     eq_val = str(row.get("Equipment", row.get("equipment", "Unknown"))).strip()
                     drv_val = str(row.get("Drive", row.get("drive", "Unknown"))).strip()
                     mat_val = str(row.get("Matcode", row.get("matcode", ""))).strip()
-                    
                     qty_val = int(row.get("Qty", row.get("qty", 1)))
                     kw_val = float(row.get("kw/hp", row.get("kw_hp", 0.0)))
                     rpm_val = str(row.get("rpm", row.get("RPM", "1440"))).strip()
@@ -205,3 +203,4 @@ with tab_master:
                     insert_motor((area_val, eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
                     import_counter += 1
                 
+                st.success(f"🚀 Successfully imported {import_counter} motor records into your active ledger!")
