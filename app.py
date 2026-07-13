@@ -1,5 +1,4 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import re
 
@@ -9,24 +8,25 @@ st.set_page_config(page_title="Motor Cloud Sync Manager", layout="wide")
 st.title("⚡ Industrial Motor Tracker (Google Drive Live Sync)")
 st.markdown("All updates made here or directly on the Google Sheet sync both ways instantly.")
 
-# --- INITIALIZE LIVE GOOGLE SHEETS CONNECTION ---
+# --- INITIALIZE NATIVE DIRECT STREAM CONNECTION ---
 try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    # Target your specific data sheet tab name natively
-    df_raw = conn.read(worksheet="Sheet1", ttl=2)
+    # Safely fetch the raw public CSV link string from your secrets dashboard panel
+    csv_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+    
+    # Direct network pipeline bypasses the sheet library engine to load the 208 motors instantly
+    df_raw = pd.read_csv(csv_url)
 except Exception as e:
-    st.error(f"Failed to connect to Google Drive Sheet. Verify your connection link tokens in Secrets. Error: {e}")
+    st.error(f"Failed to fetch public stream from Google Drive. Verify your Secrets link configuration. Error: {e}")
     st.stop()
 
-# --- RESTRUCTURE & MAP REAL WORKSHEET HEADER TOKENS ---
+# --- RESTRUCTURE & MAP WORKSHEET HEADER TOKENS ---
 if not df_raw.empty:
-    # Build a copy to protect structural arrays during evaluation loops
     df_motors = df_raw.copy()
     
-    # 1. Clean, strip, and lowercase all incoming spreadsheet headers to eliminate token mismatches
+    # Clean, strip, and lowercase all column names automatically to avoid layout bugs
     df_motors.columns = [str(c).strip().lower() for c in df_motors.columns]
     
-    # 2. Map structural variations (like 'no load current' or 'kw/hp') to clean code handles
+    # Map custom variations (like 'no load current' or 'kw/hp') to clear code handles
     rename_map = {}
     for col in df_motors.columns:
         if "no load" in col or "no_load" in col:
@@ -37,16 +37,15 @@ if not df_raw.empty:
     if rename_map:
         df_motors = df_motors.rename(columns=rename_map)
         
-    # 3. Fill missing value empty spaces with clear blank elements
+    # Fill empty data spaces with clean blank fields
     for col in df_motors.columns:
         df_motors[col] = df_motors[col].fillna("").astype(str).str.strip()
         
-    # Ensure status column exist safely for layout styling rules
     if "status" not in df_motors.columns:
         df_motors["status"] = "Healthy"
     df_motors["status"] = df_motors["status"].replace("", "Healthy")
 else:
-    st.warning("⚠️ Data Structural Error: Connected successfully, but worksheet contains no rows.")
+    st.warning("⚠️ Data Structural Error: Connected successfully, but your worksheet contains zero rows of data.")
     st.stop()
 
 # --- UTILITIES ---
@@ -56,7 +55,7 @@ def sanitize_digits(val, max_digits):
     cleaned = re.sub(r'[^0-9.]', '', str(val).strip())
     if "." in cleaned:
         parts = cleaned.split('.')
-        integer_part = parts[0][:max_digits]
+        integer_part = parts[:max_digits]
         decimal_part = "".join(parts[1:])[:2]
         return f"{integer_part}.{decimal_part}".strip('.')
     return cleaned[:max_digits]
@@ -118,7 +117,6 @@ with tab_view:
         return [''] * len(series)
         
     if not filtered_df.empty:
-        # Resolve display lists mapping code keys to match your exact sheet labels cleanly
         core_cols = ["area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
         display_cols = [c for c in core_cols if c in filtered_df.columns]
         
@@ -138,6 +136,8 @@ with tab_view:
 # ==================== TAB 2: FIELD STATUS UPDATE ====================
 with tab_update:
     st.subheader("Append / Edit Status & Remarks")
+    st.info("💡 **💡 Read-Only Link Active:** Two-way writeback requires an API service token configuration. You can view your real-time fleet adjustments here.")
+    
     if df_motors.empty:
         st.warning("Please populate your Google Sheet rows first.")
     else:
@@ -146,53 +146,22 @@ with tab_update:
         
         matched_indices = df_motors[df_motors["selector_label"] == selected_motor_label].index
         if len(matched_indices) > 0:
-            target_idx = matched_indices[0]
+            target_idx = matched_indices
             selected_row = df_motors.loc[target_idx]
             
-            st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
+            st.info(f"📍 Selected Asset: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
             
             with st.form("status_update_form"):
                 current_status = selected_row["status"]
                 status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
                 status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
+                
                 new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
                 new_remarks = st.text_area("Field Remarks / Update Log:", value=selected_row["remarks"])
-                submit_status = st.form_submit_button("Submit & Write-Back to Google Drive")
                 
-            if submit_status:
-                # Target and rewrite the live memory coordinates inside the local dataframe row
-                df_raw.iloc[target_idx, df_raw.columns.get_loc(df_raw.columns[df_raw.columns.str.lower() == 'status'][0])] = new_status
-                df_raw.iloc[target_idx, df_raw.columns.get_loc(df_raw.columns[df_raw.columns.str.lower() == 'remarks'][0])] = new_remarks
-                
-                # Push the original structural dataframe mapping safely back to Google Sheets
-                conn.update(worksheet="Sheet1", data=df_raw)
-                st.success("✅ Change committed! Google Sheet updated in real time.")
-                st.rerun()
+                st.form_submit_button("Submit Modifications (Disabled in Read-Only Mode)")
 
-# ==================== TAB 3: MASTER DATA ENTRY ====================
+# ==================== TAB 3: ADD MOTOR ASSET ====================
 with tab_master:
-    st.subheader("Add Single Motor Asset Manually to Cloud Registry")
-    
-    with st.form("manual_entry_form"):
-        st.markdown("##### 📌 Location & Identification")
-        area_input = st.text_input("Area / Shop / Zone Location*")
-        eq = st.text_input("Equipment Name*")
-        drv = st.text_input("Drive Name")
-        mat_in = st.text_input("Matcode (Max 12 digits)")
-        
-        st.markdown("##### ⚙️ Technical Design Parameters")
-        qty_in = st.text_input("Quantity", value="1")
-        kw_in = st.text_input("Power Rating kw/hp (Max 6 digits)")
-        rpm_in = st.text_input("RPM Speed (Max 5 digits)")
-        frm = st.text_input("Frame Dimension Size")
-        mnt = st.text_input("Mount Configuration Type")
-        
-        st.markdown("##### ⚡ Electrical Ratings & Coupling")
-        curr_in = st.text_input("Full Load Current Amps (Max 6 digits)")
-        nl_curr = st.text_input("No Load Current Amps")
-        cpl = st.text_input("Coupling Details")
-        
-        st.markdown("##### 📈 Operational Status & Log")
-        init_status = st.selectbox("Initial Operational Status:", ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"])
-        rem = st.text_area("Initial Master Database Remarks", value="Manually entered asset record.")
-        
+    st.subheader("Add Single Motor Asset Manually")
+    st.info("📋 To maintain your live master register, open your linked Google Drive sheet directly on your laptop/mobile browser and append rows. Your additions will reflect inside this search panel instantly.")
