@@ -12,28 +12,26 @@ st.markdown("All updates made here or directly on the Google Sheet sync both way
 # --- INITIALIZE LIVE GOOGLE SHEETS CONNECTION ---
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # SPECIFIC WORKSHEET TARGETING FIX:
-    # Explicitly read from 'Sheet1'. If your data is on 'Sheet2', change this to worksheet="Sheet2"
-    df_motors = conn.read(worksheet="Sheet1", ttl=2)
+    # Read the data sheet natively
+    df_motors = conn.read(ttl=2)
 except Exception as e:
     st.error(f"Failed to connect to Google Drive Sheet. Verify your connection link tokens in Secrets. Error: {e}")
     st.stop()
 
-# Safe data validation guard to ensure data columns actually exist before drawing the layout elements
-if df_motors.empty or "area" not in [str(c).lower() for c in df_motors.columns]:
-    st.warning("⚠️ **Data Structural Error:** Connected successfully, but 'Sheet1' appears empty or column headers are missing. Check that your Google Sheet has row headers named 'Area', 'Equipment', and 'Drive' in row 1.")
-    st.dataframe(df_motors, use_container_width=True) # Displays whatever raw data it found for visual diagnosis
+# Auto-detect column naming structures and map lowercase versions for layout safety
+if not df_motors.empty:
+    df_motors.columns = [str(c).lower().strip() for c in df_motors.columns]
+    
+    # Fill missing value empty spaces with clear blank elements
+    for col in df_motors.columns:
+        df_motors[col] = df_motors[col].fillna("").astype(str).str.strip()
+    
+    if "status" not in df_motors.columns:
+        df_motors["status"] = "Healthy"
+    df_motors["status"] = df_motors["status"].replace("", "Healthy")
+else:
+    st.warning("⚠️ **Data Structural Error:** Connected successfully, but your worksheet table contains zero data rows or headers.")
     st.stop()
-
-# Standardize case formatting to lowercase for code stability parameters
-df_motors.columns = [str(c).lower().strip() for c in df_motors.columns]
-
-# Clean missing string rows upfront to prevent visual system grid crashes
-for col in df_motors.columns:
-    df_motors[col] = df_motors[col].fillna("").astype(str).str.strip()
-if "status" not in df_motors.columns:
-    df_motors["status"] = "Healthy"
-df_motors["status"] = df_motors["status"].replace("", "Healthy")
 
 # --- UTILITIES ---
 def sanitize_digits(val, max_digits):
@@ -42,7 +40,7 @@ def sanitize_digits(val, max_digits):
     cleaned = re.sub(r'[^0-9.]', '', str(val).strip())
     if "." in cleaned:
         parts = cleaned.split('.')
-        integer_part = parts[:max_digits]
+        integer_part = parts[0][:max_digits]
         decimal_part = "".join(parts[1:])[:2]
         return f"{integer_part}.{decimal_part}".strip('.')
     return cleaned[:max_digits]
@@ -105,7 +103,7 @@ with tab_view:
         return [''] * len(series)
         
     if not filtered_df.empty:
-        display_cols = [c for col in ["area", "equipment", "drive", "matcode", "qty", "kw/hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"] if (c:=col) in filtered_df.columns]
+        display_cols = [c for col in ["area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"] if (c:=col) in filtered_df.columns]
         
         formatted_styled_df = (
             filtered_df[display_cols]
@@ -153,8 +151,8 @@ with tab_update:
                 if "selector_label" in df_motors.columns:
                     df_motors = df_motors.drop(columns=["selector_label"])
                 
-                # Write back targeting Sheet1 explicitly
-                conn.update(worksheet="Sheet1", data=df_motors)
+                # Write back targeting active worksheet natively
+                conn.update(data=df_motors)
                 st.success("✅ Change committed! Google Sheet updated in real time.")
                 st.rerun()
 
@@ -193,3 +191,15 @@ with tab_master:
                 matcode_val = sanitize_digits(mat_in, max_digits=12)
                 current_val = sanitize_digits(curr_in, max_digits=6)
                 kw_val = sanitize_digits(kw_in, max_digits=6)
+                rpm_val = sanitize_digits(rpm_in, max_digits=5)
+                
+                row_data = {
+                    "area": area_input,
+                    "equipment": eq,
+                    "drive": drv,
+                    "matcode": matcode_val,
+                    "qty": qty,
+                    "kw/hp": kw_val,
+                    "rpm": rpm_val,
+                    "frame": frm,
+                    "mount": mnt,
