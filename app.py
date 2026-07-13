@@ -12,20 +12,21 @@ def get_db_connection():
 def init_database():
     conn = get_db_connection()
     cursor = conn.cursor()
+    # Removed structural row constraints to allow unrestricted, flexible raw data saves
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS motor_registry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             area TEXT,
             equipment TEXT,
-            drive TEXT UNIQUE,
+            drive TEXT,
             matcode TEXT,
-            qty INTEGER DEFAULT 1,
-            kw_hp REAL,
+            qty TEXT,
+            kw_hp TEXT,
             rpm TEXT,
             frame TEXT,
             mount TEXT,
-            current REAL,
-            no_load_current REAL,
+            current TEXT,
+            no_load_current TEXT,
             coupling TEXT,
             status TEXT DEFAULT 'Healthy',
             remarks TEXT
@@ -44,7 +45,7 @@ def insert_motor(data_tuple):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT OR IGNORE INTO motor_registry (area, equipment, drive, matcode, qty, kw_hp, rpm, frame, mount, current, no_load_current, coupling, status, remarks)
+        INSERT INTO motor_registry (area, equipment, drive, matcode, qty, kw_hp, rpm, frame, mount, current, no_load_current, coupling, status, remarks)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, data_tuple)
     conn.commit()
@@ -136,7 +137,7 @@ with tab_update:
         
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
-            selected_row = matched_rows.iloc[0]
+            selected_row = matched_rows.iloc
             m_id = int(selected_row["id"])
             m_area = str(selected_row["area"])
             m_eq = str(selected_row["equipment"])
@@ -174,37 +175,36 @@ with tab_master:
     if uploaded_excel is not None:
         excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
         
-        # Clean missing values or convert data types safely upfront
+        # Converts EVERY single data point directly into a safe text string representation.
+        # This completely stops Excel parsing errors regardless of formatting issues.
         for col in excel_df.columns:
-            if col.lower() in ['qty', 'quantity']:
-                excel_df[col] = pd.to_numeric(excel_df[col], errors='coerce').fillna(1)
-            elif col.lower() in ['kw/hp', 'kw_hp', 'current', 'no_load_current']:
-                excel_df[col] = pd.to_numeric(excel_df[col], errors='coerce').fillna(0.0)
-            else:
-                excel_df[col] = excel_df[col].astype(str).replace(['nan', 'NaN', 'None', '<NA>'], '')
+            excel_df[col] = excel_df[col].astype(str).replace(['nan', 'NaN', 'None', '<NA>'], '')
         
-        st.write("📊 Previewing Cleaned Excel Sheet Data Structure:")
-        st.dataframe(excel_df.head(3), use_container_width=True)
+        st.write("📊 Previewing Raw Uploaded Excel Sheet Data Structure:")
+        st.dataframe(excel_df, use_container_width=True)
         
         if st.button("Confirm Bulk Import into SQLite Engine"):
             import_counter = 0
             skipped_counter = 0
             
             for index, row in excel_df.iterrows():
-                # 1. READ RAW VALUES Safely
-                area_val = str(row.get("Area", row.get("area", "Unknown Area"))).strip()
+                area_val = str(row.get("Area", row.get("area", ""))).strip()
                 eq_val = str(row.get("Equipment", row.get("equipment", ""))).strip()
                 drv_val = str(row.get("Drive", row.get("drive", ""))).strip()
                 mat_val = str(row.get("Matcode", row.get("matcode", ""))).strip()
-                qty_val = int(row.get("Qty", row.get("qty", 1)))
-                kw_val = float(row.get("kw/hp", row.get("kw_hp", 0.0)))
+                qty_val = str(row.get("Qty", row.get("qty", ""))).strip()
+                kw_val = str(row.get("kw/hp", row.get("kw_hp", ""))).strip()
                 rpm_val = str(row.get("rpm", row.get("RPM", ""))).strip()
                 frame_val = str(row.get("frame", row.get("Frame", ""))).strip()
                 mount_val = str(row.get("mount", row.get("Mount", ""))).strip()
-                curr_val = float(row.get("current", row.get("Current", 0.0)))
-                nl_curr_val = float(row.get("no_load_current", 0.0))
+                curr_val = str(row.get("current", row.get("Current", ""))).strip()
+                nl_curr_val = str(row.get("no_load_current", "")).strip()
                 cpl_val = str(row.get("coupling", row.get("Coupling", ""))).strip()
                 rem_val = str(row.get("remarks", row.get("Remarks", ""))).strip()
                 
-                # 2. STRICT ROW VALIDATION GUARD
-                # If critical identification fields are completely missing, skip the row entirely
+                # Check for critical fields (Area and Equipment)
+                if not area_val or not eq_val:
+                    skipped_counter += 1
+                    continue
+                
+                insert_motor((area_val, eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
