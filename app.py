@@ -96,7 +96,7 @@ def enforce_float_limit(val, max_digits):
 
 def enforce_int_limit(val, max_digits):
     cleaned_str = clean_to_numeric_string(val)
-    clean_int_str = cleaned_str.split('.')[0][:max_digits]
+    clean_int_str = cleaned_str.split('.')[:max_digits]
     try:
         return int(clean_int_str) if clean_int_str else None
     except ValueError:
@@ -211,7 +211,8 @@ with tab_update:
         
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
-            selected_row = matched_rows.iloc
+            # FIX: Added [0] index accessor to extract the correct single row dictionary map
+            selected_row = matched_rows.iloc[0]
             m_id = int(selected_row["id"])
             m_area = str(selected_row["area"])
             m_eq = str(selected_row["equipment"])
@@ -234,4 +235,3 @@ with tab_update:
                 
             if submit_status:
                 update_motor_status(m_id, "status", new_status)
-                update_motor_status(m_id, "remarks", new_remarks)
