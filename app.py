@@ -32,7 +32,7 @@ def init_database():
         )
     """)
     cursor.execute("PRAGMA table_info(motor_registry)")
-    columns = [row for row in cursor.fetchall()]
+    columns = [row[1] for row in cursor.fetchall()]
     if "area" not in columns:
         cursor.execute("ALTER TABLE motor_registry ADD COLUMN area TEXT")
     conn.commit()
