@@ -21,7 +21,7 @@ def init_database():
             matcode TEXT,
             qty INTEGER DEFAULT 1,
             kw_hp REAL,
-            rpm INTEGER,
+            rpm TEXT,
             frame TEXT,
             mount TEXT,
             current REAL,
@@ -31,11 +31,6 @@ def init_database():
             remarks TEXT
         )
     """)
-    cursor.execute("PRAGMA table_info(motor_registry)")
-    # Corrected extraction logic to read the column name string parameter cleanly
-    columns = [row[1] for row in cursor.fetchall()]
-    if "area" not in columns:
-        cursor.execute("ALTER TABLE motor_registry ADD COLUMN area TEXT")
     conn.commit()
     conn.close()
 
@@ -172,38 +167,41 @@ with tab_master:
     if uploaded_excel is not None:
         try:
             excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
-            st.write("📊 Previewing Uploaded Excel Sheet Data Structure:")
+            
+            # --- CRITICAL BUG FIX FOR BLANK EXCEL CELLS ---
+            # Replace empty/missing cells dynamically to ensure math parsing won't crash
+            for col in excel_df.columns:
+                if col.lower() in ['qty', 'quantity']:
+                    excel_df[col] = pd.to_numeric(excel_df[col], errors='coerce').fillna(1)
+                elif col.lower() in ['kw/hp', 'kw_hp', 'current', 'no_load_current']:
+                    excel_df[col] = pd.to_numeric(excel_df[col], errors='coerce').fillna(0.0)
+                else:
+                    excel_df[col] = excel_df[col].astype(str).replace(['nan', 'NaN', 'None', '<NA>'], '')
+            
+            st.write("📊 Previewing Cleaned Excel Sheet Data Structure:")
             st.dataframe(excel_df.head(3), use_container_width=True)
             
             if st.button("Confirm Bulk Import into SQLite Engine"):
                 import_counter = 0
                 for index, row in excel_df.iterrows():
-                    area_val = str(row.get("Area", row.get("area", "Unknown Area")))
-                    eq_val = str(row.get("Equipment", row.get("equipment", "Unknown")))
-                    drv_val = str(row.get("Drive", row.get("drive", "Unknown")))
-                    mat_val = str(row.get("Matcode", row.get("matcode", "")))
+                    area_val = str(row.get("Area", row.get("area", "Unknown Area"))).strip()
+                    eq_val = str(row.get("Equipment", row.get("equipment", "Unknown"))).strip()
+                    drv_val = str(row.get("Drive", row.get("drive", "Unknown"))).strip()
+                    mat_val = str(row.get("Matcode", row.get("matcode", ""))).strip()
+                    
                     qty_val = int(row.get("Qty", row.get("qty", 1)))
                     kw_val = float(row.get("kw/hp", row.get("kw_hp", 0.0)))
-                    rpm_val = int(row.get("rpm", row.get("RPM", 1440)))
-                    frame_val = str(row.get("frame", row.get("Frame", "")))
-                    mount_val = str(row.get("mount", row.get("Mount", "foot")))
+                    rpm_val = str(row.get("rpm", row.get("RPM", "1440"))).strip()
+                    frame_val = str(row.get("frame", row.get("Frame", ""))).strip()
+                    mount_val = str(row.get("mount", row.get("Mount", "foot"))).strip()
                     curr_val = float(row.get("current", row.get("Current", 0.0)))
                     nl_curr_val = float(row.get("no_load_current", 0.0))
-                    cpl_val = str(row.get("coupling", row.get("Coupling", "")))
-                    rem_val = str(row.get("remarks", row.get("Remarks", "Imported via Excel")))
+                    cpl_val = str(row.get("coupling", row.get("Coupling", ""))).strip()
+                    rem_val = str(row.get("remarks", row.get("Remarks", "Imported via Excel"))).strip()
+                    
+                    if rem_val == "":
+                        rem_val = "Imported via Excel"
                     
                     insert_motor((area_val, eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
                     import_counter += 1
                 
-                st.success(f"🚀 Successfully imported {import_counter} motor records into your active ledger!")
-                st.rerun()
-                
-        except Exception as e:
-            st.error(f"Error parsing Excel file structural mappings: {e}")
-            
-    st.markdown("---")
-    st.subheader("Alternative: Add Single Motor Asset Manually")
-    
-    with st.form("manual_entry_form", clear_on_submit=True):
-        area_input = st.text_input("Area / Shop / Zone Location (e.g., Fce #2, Raw Mill)")
-        eq = st.text_input("Equipment (e.g., Air Compressor)")
