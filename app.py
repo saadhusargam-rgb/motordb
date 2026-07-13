@@ -96,7 +96,7 @@ def enforce_float_limit(val, max_digits):
 
 def enforce_int_limit(val, max_digits):
     cleaned_str = clean_to_numeric_string(val)
-    clean_int_str = cleaned_str.split('.')[:max_digits]
+    clean_int_str = cleaned_str.split('.')[0][:max_digits]
     try:
         return int(clean_int_str) if clean_int_str else None
     except ValueError:
@@ -211,7 +211,7 @@ with tab_update:
         
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
-            selected_row = matched_rows.iloc[0]
+            selected_row = matched_rows.iloc
             m_id = int(selected_row["id"])
             m_area = str(selected_row["area"])
             m_eq = str(selected_row["equipment"])
@@ -221,14 +221,12 @@ with tab_update:
             
             st.info(f"📍 Modifying: Area {m_area} -> {m_eq} ({m_drv})")
             
-            # Form layout handles fields vertically to guarantee clear formatting properties
             with st.form("status_update_form"):
                 current_status = m_status if m_status and m_status != "None" and m_status != "" else "Healthy"
                 status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
                 status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
                 
                 new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
-                
                 current_remarks = m_remarks if m_remarks and m_remarks != "None" else ""
                 new_remarks = st.text_area("Field Remarks / Update Log:", value=current_remarks)
                 
@@ -236,3 +234,4 @@ with tab_update:
                 
             if submit_status:
                 update_motor_status(m_id, "status", new_status)
+                update_motor_status(m_id, "remarks", new_remarks)
