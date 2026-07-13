@@ -12,9 +12,12 @@ def get_db_connection():
 def init_database():
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # 1. Base table creation (with new Area column)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS motor_registry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            area TEXT,
             equipment TEXT,
             drive TEXT,
             matcode TEXT,
@@ -30,6 +33,13 @@ def init_database():
             remarks TEXT
         )
     """)
+    
+    # 2. Migration Check: Add column if the database file already exists from prior builds
+    cursor.execute("PRAGMA table_info(motor_registry)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "area" not in columns:
+        cursor.execute("ALTER TABLE motor_registry ADD COLUMN area TEXT")
+        
     conn.commit()
     conn.close()
 
@@ -43,8 +53,8 @@ def insert_motor(data_tuple):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO motor_registry (equipment, drive, matcode, qty, kw_hp, rpm, frame, mount, current, no_load_current, coupling, status, remarks)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO motor_registry (area, equipment, drive, matcode, qty, kw_hp, rpm, frame, mount, current, no_load_current, coupling, status, remarks)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, data_tuple)
     conn.commit()
     conn.close()
@@ -56,16 +66,12 @@ def update_motor_status(motor_id, field_name, new_value):
     conn.commit()
     conn.close()
 
-# --- HELPER FUNCTION FOR EXCEL EXPORT ---
 def convert_df_to_excel(df):
-    # Create an in-memory buffer to store the Excel file bytes safely
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        # Drop internal helper columns if they exist before exporting
         export_df = df.copy()
         if "selector_label" in export_df.columns:
             export_df = export_df.drop(columns=["selector_label"])
-        
         export_df.to_excel(writer, index=False, sheet_name='Motor Registry')
     return buffer.getvalue()
 
@@ -81,13 +87,11 @@ tab_view, tab_update, tab_master = st.tabs(["🔍 Search & View", "⚙️ Field 
 
 # ==================== TAB 1: EASY SEARCH & VIEW ====================
 with tab_view:
-    # --- BULK EXCEL EXPORT WIDGET ---
-    export_col1, export_col2 = st.columns([4, 1])
+    export_col1, export_col2 = st.columns()
     with export_col1:
         st.subheader("Quick Search Filter")
     with export_col2:
         if not df_motors.empty:
-            # Generate the Excel data bytes
             excel_data = convert_df_to_excel(df_motors)
             st.download_button(
                 label="📥 Export to Excel",
@@ -97,13 +101,18 @@ with tab_view:
                 use_container_width=True
             )
 
-    search_col1, search_col2 = st.columns(2)
+    search_col1, search_col2, search_col3 = st.columns(3)
     with search_col1:
-        equipment_filter = st.selectbox("Filter by Equipment Type:", ["All"] + sorted(list(df_motors["equipment"].dropna().unique())))
+        # Filter by Plant Area
+        area_filter = st.selectbox("Filter by Area / Zone:", ["All"] + sorted(list(df_motors["area"].dropna().unique())))
     with search_col2:
-        search_query = st.text_input("🔍 Quick Search (Drive, Frame, Matcode):", "").lower()
+        equipment_filter = st.selectbox("Filter by Equipment Type:", ["All"] + sorted(list(df_motors["equipment"].dropna().unique())))
+    with search_col3:
+        search_query = st.text_input("🔍 Keyword Search (Drive, Frame, Matcode):", "").lower()
         
     filtered_df = df_motors.copy()
+    if area_filter != "All":
+        filtered_df = filtered_df[filtered_df["area"] == area_filter]
     if equipment_filter != "All":
         filtered_df = filtered_df[filtered_df["equipment"] == equipment_filter]
     if search_query:
@@ -121,7 +130,9 @@ with tab_view:
         return [''] * len(row)
         
     if not filtered_df.empty:
-        st.dataframe(filtered_df.style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
+        # Display the column headers beautifully including Area
+        display_cols = ["id", "area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
+        st.dataframe(filtered_df[display_cols].style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
     else:
         st.info("No records match your active search terms.")
 
@@ -131,13 +142,14 @@ with tab_update:
     if df_motors.empty:
         st.warning("Please populate the Master Data Registry first via Tab 3.")
     else:
-        df_motors["selector_label"] = "ID " + df_motors["id"].astype(str) + " | " + df_motors["equipment"].astype(str) + " (" + df_motors["drive"].astype(str) + ")"
+        # Updated selector label to show Area for easier on-site identification
+        df_motors["selector_label"] = "ID " + df_motors["id"].astype(str) + " | Loc: " + df_motors["area"].astype(str) + " | " + df_motors["equipment"].astype(str) + " (" + df_motors["drive"].astype(str) + ")"
         selected_motor_label = st.selectbox("Select Target Motor to Modify:", df_motors["selector_label"].tolist())
         
         selected_row = df_motors[df_motors["selector_label"] == selected_motor_label].iloc
         m_id = int(selected_row["id"])
         
-        st.info(f"📍 Modifying: {selected_row['equipment']} - {selected_row['drive']}")
+        st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
         
         with st.form("status_update_form"):
             up_col1, up_col2 = st.columns(2)
@@ -160,7 +172,7 @@ with tab_update:
 # ==================== TAB 3: MASTER DATA ENTRY ====================
 with tab_master:
     st.subheader("Bulk Import via Excel Spreadsheet (.xlsx)")
-    st.markdown("Ensure your Excel columns match these names: **Equipment, Drive, Matcode, Qty, kw/hp, rpm, frame, mount, current, coupling, remarks**")
+    st.markdown("Ensure your Excel columns match these names: **Area, Equipment, Drive, Matcode, Qty, kw/hp, rpm, frame, mount, current, coupling, remarks**")
     
     uploaded_excel = st.file_uploader("Upload Motor List Spreadsheet File", type=["xlsx"])
     
@@ -171,10 +183,11 @@ with tab_master:
             st.dataframe(excel_df.head(3), use_container_width=True)
             
             if st.button("Confirm Bulk Import into SQLite Engine"):
-                conn = get_db_connection()
                 import_counter = 0
                 
                 for index, row in excel_df.iterrows():
+                    # Support both uppercase or lowercase columns from Excel sheets
+                    area_val = str(row.get("Area", row.get("area", "Unknown Area")))
                     eq_val = str(row.get("Equipment", row.get("equipment", "Unknown")))
                     drv_val = str(row.get("Drive", row.get("drive", "Unknown")))
                     mat_val = str(row.get("Matcode", row.get("matcode", "")))
@@ -188,7 +201,7 @@ with tab_master:
                     cpl_val = str(row.get("coupling", row.get("Coupling", "")))
                     rem_val = str(row.get("remarks", row.get("Remarks", "Imported via Excel")))
                     
-                    insert_motor((eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
+                    insert_motor((area_val, eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
                     import_counter += 1
                 
                 st.success(f"🚀 Successfully imported {import_counter} motor records into your active ledger!")
@@ -199,18 +212,3 @@ with tab_master:
             
     st.markdown("---")
     st.subheader("Alternative: Add Single Motor Asset Manually")
-    with st.form("master_entry_form", clear_on_submit=True):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            eq = st.text_input("Equipment (e.g., Air Compressor)")
-            drv = st.text_input("Drive Name (e.g., Compressor motor west)")
-            mat = st.text_input("Matcode")
-            qty = st.number_input("Quantity", min_value=1, value=1, step=1)
-        with c2:
-            kw = st.number_input("Power Rating (kw/hp)", min_value=0.0, step=0.1, format="%.2f")
-            rpm = st.number_input("RPM", min_value=0, value=1440, step=10)
-            frm = st.text_input("Frame Dimension Size")
-            mnt = st.selectbox("Mount Configuration Type", ["foot", "flange", "foot/flange"])
-        with c3:
-            curr = st.number_input("Full Load Current (Amps)", min_value=0.0, step=0.1, format="%.2f")
-            nl_curr = st.number_input("No Load Current (Amps)", min_value=0.0, step=0.1, format="%.2f")
