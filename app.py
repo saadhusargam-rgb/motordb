@@ -74,7 +74,7 @@ def clean_to_numeric_string(val):
     cleaned = re.sub(r'[^0-9.]', '', str(val))
     if cleaned.count('.') > 1:
         parts = cleaned.split('.')
-        cleaned = parts[0] + '.' + ''.join(parts[1:])
+        cleaned = parts + '.' + ''.join(parts[1:])
     return cleaned
 
 def enforce_float_limit(val, max_digits):
@@ -96,21 +96,20 @@ def enforce_float_limit(val, max_digits):
 
 def enforce_int_limit(val, max_digits):
     cleaned_str = clean_to_numeric_string(val)
-    clean_int_str = cleaned_str.split('.')[0][:max_digits]
+    clean_int_str = cleaned_str.split('.')[:max_digits]
     try:
         return int(clean_int_str) if clean_int_str else None
     except ValueError:
         return None
 
 def safe_decimal_formatter(val):
-    """Safely forces 2 decimal places only if value can be treated as a number."""
     if pd.isna(val) or val is None or str(val).strip().lower() in ['nan', 'none', '']:
         return ""
     try:
         numeric_value = float(val)
         return f"{numeric_value:.2f}"
     except (ValueError, TypeError):
-        return str(val) # Keeps raw text fallback safely instead of crashing
+        return str(val)
 
 # --- APP LAYOUT CONFIGURATION ---
 st.set_page_config(page_title="Motor Database Manager", layout="wide")
@@ -137,12 +136,17 @@ with tab_view:
             use_container_width=True
         )
 
-    search_col1, search_col2, search_col3 = st.columns(3)
+    # Added 4 columns to fit the Status Filter comfortably side-by-side
+    search_col1, search_col2, search_col3, search_col4 = st.columns(4)
     with search_col1:
         area_filter = st.selectbox("Filter by Area / Zone:", ["All"] + sorted(list(df_motors["area"].dropna().unique())) if not df_motors.empty else ["All"])
     with search_col2:
         equipment_filter = st.selectbox("Filter by Equipment Type:", ["All"] + sorted(list(df_motors["equipment"].dropna().unique())) if not df_motors.empty else ["All"])
     with search_col3:
+        # NEW: Operational Status Filter Dropdown
+        status_options = ["All", "Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
+        status_filter = st.selectbox("Filter by Status:", status_options)
+    with search_col4:
         search_query = st.text_input("🔍 Keyword Search (Drive, Frame, Matcode):", "").lower()
         
     filtered_df = df_motors.copy()
@@ -151,6 +155,8 @@ with tab_view:
             filtered_df = filtered_df[filtered_df["area"] == area_filter]
         if equipment_filter != "All":
             filtered_df = filtered_df[filtered_df["equipment"] == equipment_filter]
+        if status_filter != "All":
+            filtered_df = filtered_df[filtered_df["status"] == status_filter]
         if search_query:
             filtered_df = filtered_df[
                 filtered_df["drive"].str.lower().str.contains(search_query, na=False) |
@@ -160,29 +166,37 @@ with tab_view:
         
     st.markdown(f"**Showing {len(filtered_df)} Matching Motors**")
     
-    def highlight_status(row):
-        if row['status'] == 'Breakdown': return ['background-color: #ffcccc'] * len(row)
-        elif row['status'] == 'Under Maintenance': return ['background-color: #fff2cc'] * len(row)
+    # --- DYNAMIC COLOR CODE STYLING MAP FUNCTION ---
+    def highlight_operational_status(row):
+        status = str(row['status']).strip()
+        # Define industrial color mappings for backgrounds and crisp text readability
+        if status == 'Healthy':
+            return ['background-color: #d4edda; color: #155724;'] * len(row)
+        elif status == 'Under Observation':
+            return ['background-color: #d1ecf1; color: #0c5460;'] * len(row)
+        elif status == 'Under Maintenance':
+            return ['background-color: #fff3cd; color: #856404;'] * len(row)
+        elif status == 'Breakdown':
+            return ['background-color: #f8d7da; color: #721c24; font-weight: bold;'] * len(row)
+        elif status == 'Spare/Scrapped':
+            return ['background-color: #e2e3e5; color: #383d41;'] * len(row)
         return [''] * len(row)
         
     if not filtered_df.empty:
         display_cols = ["id", "area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
         
-        # --- ROBUST 2-DECIMAL VISUAL FORMATTING LAYER ---
-        # Maps our fallback logic wrapper to avoid text-to-float layout crashes
         formatted_styled_df = (
             filtered_df[display_cols]
-            .style.apply(highlight_status, axis=1)
+            .style.apply(highlight_operational_status, axis=1) # Applies custom colors to the rows
             .format({
                 "matcode": safe_decimal_formatter,
                 "kw_hp": safe_decimal_formatter,
                 "current": safe_decimal_formatter
             })
         )
-        
         st.dataframe(formatted_styled_df, use_container_width=True, hide_index=True)
     else:
-        st.info("No records found in database registry. Please add entries in the Master Data Entry tab.")
+        st.info("No records found in database registry matching your active filters.")
 
 # ==================== TAB 2: FIELD STATUS UPDATE ====================
 with tab_update:
@@ -209,28 +223,12 @@ with tab_update:
                 up_col1, up_col2 = st.columns(2)
                 with up_col1:
                     current_status = m_status if m_status and m_status != "None" and m_status != "" else "Healthy"
-                    status_options = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
-                    status_idx = status_options.index(current_status) if current_status in status_options else 0
-                    new_status = st.selectbox("Operational Status:", status_options, index=status_idx)
+                    status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
+                    status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
+                    new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
                     
                 with up_col2:
                     current_remarks = m_remarks if m_remarks and m_remarks != "None" else ""
                     new_remarks = st.text_area("Field Remarks / Update Log:", value=current_remarks)
                     
                 if st.form_submit_button("Submit Operational Status Change"):
-                    update_motor_status(m_id, "status", new_status)
-                    update_motor_status(m_id, "remarks", new_remarks)
-                    st.success("Database status appended and successfully committed!")
-                    st.rerun()
-
-# ==================== TAB 3: MASTER DATA ENTRY ====================
-with tab_master:
-    st.subheader("Bulk Import via Excel Spreadsheet (.xlsx)")
-    st.markdown("Ensure your Excel columns match these names: **Area, Equipment, Drive, Matcode, Qty, kw/hp, rpm, frame, mount, current, coupling, remarks**")
-    
-    uploaded_excel = st.file_uploader("Upload Motor List Spreadsheet File", type=["xlsx"])
-    
-    if uploaded_excel is not None:
-        excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
-        
-        st.write("📊 Previewing Raw Uploaded Excel Sheet Data Structure:")
