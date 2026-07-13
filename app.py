@@ -12,16 +12,36 @@ st.markdown("All updates made here or directly on the Google Sheet sync both way
 # --- INITIALIZE LIVE GOOGLE SHEETS CONNECTION ---
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
-    df_motors = conn.read(worksheet="Sheet1", ttl=2)
+    # Target your specific data sheet tab name natively
+    df_raw = conn.read(worksheet="Sheet1", ttl=2)
 except Exception as e:
     st.error(f"Failed to connect to Google Drive Sheet. Verify your connection link tokens in Secrets. Error: {e}")
     st.stop()
 
-# Standardize columns to lowercase for application stability
-if not df_motors.empty:
-    df_motors.columns = [str(c).lower().strip() for c in df_motors.columns]
+# --- RESTRUCTURE & MAP REAL WORKSHEET HEADER TOKENS ---
+if not df_raw.empty:
+    # Build a copy to protect structural arrays during evaluation loops
+    df_motors = df_raw.copy()
+    
+    # 1. Clean, strip, and lowercase all incoming spreadsheet headers to eliminate token mismatches
+    df_motors.columns = [str(c).strip().lower() for c in df_motors.columns]
+    
+    # 2. Map structural variations (like 'no load current' or 'kw/hp') to clean code handles
+    rename_map = {}
+    for col in df_motors.columns:
+        if "no load" in col or "no_load" in col:
+            rename_map[col] = "no_load_current"
+        elif "kw" in col or "hp" in col:
+            rename_map[col] = "kw_hp"
+            
+    if rename_map:
+        df_motors = df_motors.rename(columns=rename_map)
+        
+    # 3. Fill missing value empty spaces with clear blank elements
     for col in df_motors.columns:
         df_motors[col] = df_motors[col].fillna("").astype(str).str.strip()
+        
+    # Ensure status column exist safely for layout styling rules
     if "status" not in df_motors.columns:
         df_motors["status"] = "Healthy"
     df_motors["status"] = df_motors["status"].replace("", "Healthy")
@@ -98,13 +118,16 @@ with tab_view:
         return [''] * len(series)
         
     if not filtered_df.empty:
-        display_cols = [c for col in ["area", "equipment", "drive", "matcode", "qty", "kw/hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"] if (c:=col) in filtered_df.columns]
+        # Resolve display lists mapping code keys to match your exact sheet labels cleanly
+        core_cols = ["area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
+        display_cols = [c for c in core_cols if c in filtered_df.columns]
+        
         formatted_styled_df = (
             filtered_df[display_cols]
             .style.apply(highlight_status_column, axis=0)
             .format({
                 "matcode": safe_decimal_formatter,
-                "kw/hp": safe_decimal_formatter,
+                "kw_hp": safe_decimal_formatter,
                 "current": safe_decimal_formatter
             })
         )
@@ -137,11 +160,12 @@ with tab_update:
                 submit_status = st.form_submit_button("Submit & Write-Back to Google Drive")
                 
             if submit_status:
-                df_motors.at[target_idx, "status"] = new_status
-                df_motors.at[target_idx, "remarks"] = new_remarks
-                if "selector_label" in df_motors.columns:
-                    df_motors = df_motors.drop(columns=["selector_label"])
-                conn.update(worksheet="Sheet1", data=df_motors)
+                # Target and rewrite the live memory coordinates inside the local dataframe row
+                df_raw.iloc[target_idx, df_raw.columns.get_loc(df_raw.columns[df_raw.columns.str.lower() == 'status'][0])] = new_status
+                df_raw.iloc[target_idx, df_raw.columns.get_loc(df_raw.columns[df_raw.columns.str.lower() == 'remarks'][0])] = new_remarks
+                
+                # Push the original structural dataframe mapping safely back to Google Sheets
+                conn.update(worksheet="Sheet1", data=df_raw)
                 st.success("✅ Change committed! Google Sheet updated in real time.")
                 st.rerun()
 
@@ -172,23 +196,3 @@ with tab_master:
         init_status = st.selectbox("Initial Operational Status:", ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"])
         rem = st.text_area("Initial Master Database Remarks", value="Manually entered asset record.")
         
-        submit_btn = st.form_submit_button("💾 Append to Google Sheet")
-        if submit_btn:
-            if not area_input or not eq:
-                st.error("Validation Error: 'Area' and 'Equipment Name' are required fields.")
-            else:
-                # Apply validation constraints cleanly
-                matcode_val = sanitize_digits(mat_in, max_digits=12)
-                current_val = sanitize_digits(curr_in, max_digits=6)
-                kw_val = sanitize_digits(kw_in, max_digits=6)
-                rpm_val = sanitize_digits(rpm_in, max_digits=5)
-                
-                # RESTRUCTURED LOGIC: Builds the next row index position directly 
-                # inside the master dataframe array, completely removing curly braces.
-                next_index = len(df_motors)
-                
-                df_motors.at[next_index, "area"] = str(area_input).strip()
-                df_motors.at[next_index, "equipment"] = str(eq).strip()
-                df_motors.at[next_index, "drive"] = str(drv).strip()
-                df_motors.at[next_index, "matcode"] = matcode_val
-                df_motors.at[next_index, "qty"] = str(qty_in).strip()
