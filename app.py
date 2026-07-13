@@ -12,8 +12,6 @@ def get_db_connection():
 def init_database():
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # 1. Base table creation (with new Area column)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS motor_registry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,13 +31,10 @@ def init_database():
             remarks TEXT
         )
     """)
-    
-    # 2. Migration Check: Add column if the database file already exists from prior builds
     cursor.execute("PRAGMA table_info(motor_registry)")
     columns = [row[1] for row in cursor.fetchall()]
     if "area" not in columns:
         cursor.execute("ALTER TABLE motor_registry ADD COLUMN area TEXT")
-        
     conn.commit()
     conn.close()
 
@@ -91,36 +86,36 @@ with tab_view:
     with export_col1:
         st.subheader("Quick Search Filter")
     with export_col2:
-        if not df_motors.empty:
-            excel_data = convert_df_to_excel(df_motors)
-            st.download_button(
-                label="📥 Export to Excel",
-                data=excel_data,
-                file_name="motor_registry_export.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+        # Export button will always render cleanly, even with zero records
+        excel_data = convert_df_to_excel(df_motors)
+        st.download_button(
+            label="📥 Export to Excel",
+            data=excel_data,
+            file_name="motor_registry_export.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
 
     search_col1, search_col2, search_col3 = st.columns(3)
     with search_col1:
-        # Filter by Plant Area
-        area_filter = st.selectbox("Filter by Area / Zone:", ["All"] + sorted(list(df_motors["area"].dropna().unique())))
+        area_filter = st.selectbox("Filter by Area / Zone:", ["All"] + sorted(list(df_motors["area"].dropna().unique())) if not df_motors.empty else ["All"])
     with search_col2:
-        equipment_filter = st.selectbox("Filter by Equipment Type:", ["All"] + sorted(list(df_motors["equipment"].dropna().unique())))
+        equipment_filter = st.selectbox("Filter by Equipment Type:", ["All"] + sorted(list(df_motors["equipment"].dropna().unique())) if not df_motors.empty else ["All"])
     with search_col3:
         search_query = st.text_input("🔍 Keyword Search (Drive, Frame, Matcode):", "").lower()
         
     filtered_df = df_motors.copy()
-    if area_filter != "All":
-        filtered_df = filtered_df[filtered_df["area"] == area_filter]
-    if equipment_filter != "All":
-        filtered_df = filtered_df[filtered_df["equipment"] == equipment_filter]
-    if search_query:
-        filtered_df = filtered_df[
-            filtered_df["drive"].str.lower().str.contains(search_query, na=False) |
-            filtered_df["frame"].str.lower().str.contains(search_query, na=False) |
-            filtered_df["matcode"].str.lower().str.contains(search_query, na=False)
-        ]
+    if not filtered_df.empty:
+        if area_filter != "All":
+            filtered_df = filtered_df[filtered_df["area"] == area_filter]
+        if equipment_filter != "All":
+            filtered_df = filtered_df[filtered_df["equipment"] == equipment_filter]
+        if search_query:
+            filtered_df = filtered_df[
+                filtered_df["drive"].str.lower().str.contains(search_query, na=False) |
+                filtered_df["frame"].str.lower().str.contains(search_query, na=False) |
+                filtered_df["matcode"].str.lower().str.contains(search_query, na=False)
+            ]
         
     st.markdown(f"**Showing {len(filtered_df)} Matching Motors**")
     
@@ -130,11 +125,10 @@ with tab_view:
         return [''] * len(row)
         
     if not filtered_df.empty:
-        # Display the column headers beautifully including Area
         display_cols = ["id", "area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
         st.dataframe(filtered_df[display_cols].style.apply(highlight_status, axis=1), use_container_width=True, hide_index=True)
     else:
-        st.info("No records match your active search terms.")
+        st.info("No records found in database registry. Please add entries in the Master Data Entry tab.")
 
 # ==================== TAB 2: FIELD STATUS UPDATE ====================
 with tab_update:
@@ -142,11 +136,10 @@ with tab_update:
     if df_motors.empty:
         st.warning("Please populate the Master Data Registry first via Tab 3.")
     else:
-        # Updated selector label to show Area for easier on-site identification
         df_motors["selector_label"] = "ID " + df_motors["id"].astype(str) + " | Loc: " + df_motors["area"].astype(str) + " | " + df_motors["equipment"].astype(str) + " (" + df_motors["drive"].astype(str) + ")"
         selected_motor_label = st.selectbox("Select Target Motor to Modify:", df_motors["selector_label"].tolist())
         
-        selected_row = df_motors[df_motors["selector_label"] == selected_motor_label].iloc
+        selected_row = df_motors[df_motors["selector_label"] == selected_motor_label].iloc[0]
         m_id = int(selected_row["id"])
         
         st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
@@ -184,9 +177,7 @@ with tab_master:
             
             if st.button("Confirm Bulk Import into SQLite Engine"):
                 import_counter = 0
-                
                 for index, row in excel_df.iterrows():
-                    # Support both uppercase or lowercase columns from Excel sheets
                     area_val = str(row.get("Area", row.get("area", "Unknown Area")))
                     eq_val = str(row.get("Equipment", row.get("equipment", "Unknown")))
                     drv_val = str(row.get("Drive", row.get("drive", "Unknown")))
@@ -212,3 +203,8 @@ with tab_master:
             
     st.markdown("---")
     st.subheader("Alternative: Add Single Motor Asset Manually")
+    
+    with st.form("manual_entry_form", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            area_input = st.text_input("Area / Shop / Zone Location (e.g., Fce #2, Raw Mill)")
