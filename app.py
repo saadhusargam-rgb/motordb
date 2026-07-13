@@ -174,6 +174,7 @@ with tab_master:
     if uploaded_excel is not None:
         excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
         
+        # Clean missing values or convert data types safely upfront
         for col in excel_df.columns:
             if col.lower() in ['qty', 'quantity']:
                 excel_df[col] = pd.to_numeric(excel_df[col], errors='coerce').fillna(1)
@@ -187,24 +188,23 @@ with tab_master:
         
         if st.button("Confirm Bulk Import into SQLite Engine"):
             import_counter = 0
+            skipped_counter = 0
+            
             for index, row in excel_df.iterrows():
+                # 1. READ RAW VALUES Safely
                 area_val = str(row.get("Area", row.get("area", "Unknown Area"))).strip()
-                eq_val = str(row.get("Equipment", row.get("equipment", "Unknown"))).strip()
-                drv_val = str(row.get("Drive", row.get("drive", "Unknown"))).strip()
+                eq_val = str(row.get("Equipment", row.get("equipment", ""))).strip()
+                drv_val = str(row.get("Drive", row.get("drive", ""))).strip()
                 mat_val = str(row.get("Matcode", row.get("matcode", ""))).strip()
                 qty_val = int(row.get("Qty", row.get("qty", 1)))
                 kw_val = float(row.get("kw/hp", row.get("kw_hp", 0.0)))
-                rpm_val = str(row.get("rpm", row.get("RPM", "1440"))).strip()
+                rpm_val = str(row.get("rpm", row.get("RPM", ""))).strip()
                 frame_val = str(row.get("frame", row.get("Frame", ""))).strip()
-                mount_val = str(row.get("mount", row.get("Mount", "foot"))).strip()
+                mount_val = str(row.get("mount", row.get("Mount", ""))).strip()
                 curr_val = float(row.get("current", row.get("Current", 0.0)))
                 nl_curr_val = float(row.get("no_load_current", 0.0))
-                
-                # Streamlined default clean formatting step
+                cpl_val = str(row.get("coupling", row.get("Coupling", ""))).strip()
                 rem_val = str(row.get("remarks", row.get("Remarks", ""))).strip()
-                if not rem_val:
-                    rem_val = "Imported via Excel"
                 
-                insert_motor((area_val, eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
-                import_counter += 1
-                
+                # 2. STRICT ROW VALIDATION GUARD
+                # If critical identification fields are completely missing, skip the row entirely
