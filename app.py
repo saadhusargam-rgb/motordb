@@ -13,19 +13,20 @@ def get_db_connection():
 def init_database():
     conn = get_db_connection()
     cursor = conn.cursor()
+    # Flexible column schemas guarantee zero data-type conversion lockups on database loading sequences
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS motor_registry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             area TEXT,
             equipment TEXT,
             drive TEXT,
-            matcode REAL,
+            matcode TEXT,
             qty TEXT,
-            kw_hp REAL,
-            rpm INTEGER,
+            kw_hp TEXT,
+            rpm TEXT,
             frame TEXT,
             mount TEXT,
-            current REAL,
+            current TEXT,
             no_load_current TEXT,
             coupling TEXT,
             status TEXT DEFAULT 'Healthy',
@@ -40,14 +41,13 @@ def load_motor_data():
     df = pd.read_sql_query("SELECT * FROM motor_registry", conn)
     conn.close()
     
-    # CRITICAL RENDER FIX: Automatically fill empty database values with empty strings 
-    # to prevent selection string calculation crashes in Tab 2.
+    # Absolute Data Sanitizer: Converts all database text data cleanly, 
+    # ensuring text values and spaces never break selection calculations or UI grids
     if not df.empty:
-        df["area"] = df["area"].fillna("").astype(str)
-        df["equipment"] = df["equipment"].fillna("").astype(str)
-        df["drive"] = df["drive"].fillna("").astype(str)
-        df["status"] = df["status"].fillna("Healthy").astype(str)
-        df["remarks"] = df["remarks"].fillna("").astype(str)
+        for col in df.columns:
+            df[col] = df[col].fillna("").astype(str).str.strip()
+        # Clean default fallbacks for unpopulated statuses
+        df["status"] = df["status"].replace("", "Healthy")
     return df
 
 def insert_motor(data_tuple):
@@ -76,51 +76,21 @@ def convert_df_to_excel(df):
         export_df.to_excel(writer, index=False, sheet_name='Motor Registry')
     return buffer.getvalue()
 
-# --- DATA CLEANING & CONSTRAINT UTILITIES ---
-def clean_to_numeric_string(val):
-    if pd.isna(val) or val is None:
+# --- INPUT SANITIZATION UTILITIES (TAB 3 LENGTH CONSTRAINTS) ---
+def sanitize_digits(val, max_digits):
+    """Strips formatting and restricts numeric digit arrays to strict length metrics."""
+    if not val:
         return ""
+    # Strip any characters that aren't numbers or a decimal point
     cleaned = re.sub(r'[^0-9.]', '', str(val))
-    if cleaned.count('.') > 1:
+    if "." in cleaned:
         parts = cleaned.split('.')
-        cleaned = parts + '.' + ''.join(parts[1:])
-    return cleaned
+        integer_part = parts[0][:max_digits]
+        decimal_part = "".join(parts[1:])[:2] # Limits to 2 decimals
+        return f"{integer_part}.{decimal_part}".strip('.')
+    return cleaned[:max_digits]
 
-def enforce_float_limit(val, max_digits):
-    cleaned_str = clean_to_numeric_string(val)
-    if not cleaned_str or cleaned_str == ".":
-        return None
-    no_dot = cleaned_str.replace('.', '')[:max_digits]
-    if '.' in cleaned_str:
-        dot_idx = cleaned_str.index('.')
-        integer_part = cleaned_str[:dot_idx][:max_digits]
-        decimal_part = cleaned_str[dot_idx+1:][:(max_digits - len(integer_part))]
-        final_str = f"{integer_part}.{decimal_part}".strip('.')
-    else:
-        final_str = no_dot
-    try:
-        return float(final_str) if final_str else None
-    except ValueError:
-        return None
-
-def enforce_int_limit(val, max_digits):
-    cleaned_str = clean_to_numeric_string(val)
-    clean_int_str = cleaned_str.split('.')[:max_digits]
-    try:
-        return int(clean_int_str) if clean_int_str else None
-    except ValueError:
-        return None
-
-def safe_decimal_formatter(val):
-    if pd.isna(val) or val is None or str(val).strip().lower() in ['nan', 'none', '']:
-        return ""
-    try:
-        numeric_value = float(val)
-        return f"{numeric_value:.2f}"
-    except (ValueError, TypeError):
-        return str(val)
-
-# --- APP LAYOUT CONFIGURATION ---
+# --- APP NAVIGATION LAYOUT CONTROLS ---
 st.set_page_config(page_title="Motor Database Manager", layout="wide")
 init_database()
 df_motors = load_motor_data()
@@ -147,9 +117,9 @@ with tab_view:
 
     search_col1, search_col2, search_col3, search_col4 = st.columns(4)
     with search_col1:
-        area_filter = st.selectbox("Filter by Area / Zone:", ["All"] + sorted(list(df_motors["area"].dropna().unique())) if not df_motors.empty else ["All"])
+        area_filter = st.selectbox("Filter by Area / Zone:", ["All"] + sorted(list(df_motors["area"].unique())) if not df_motors.empty else ["All"])
     with search_col2:
-        equipment_filter = st.selectbox("Filter by Equipment Type:", ["All"] + sorted(list(df_motors["equipment"].dropna().unique())) if not df_motors.empty else ["All"])
+        equipment_filter = st.selectbox("Filter by Equipment Type:", ["All"] + sorted(list(df_motors["equipment"].unique())) if not df_motors.empty else ["All"])
     with search_col3:
         status_options = ["All", "Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
         status_filter = st.selectbox("Filter by Status:", status_options)
@@ -168,7 +138,7 @@ with tab_view:
             filtered_df = filtered_df[
                 filtered_df["drive"].str.lower().str.contains(search_query, na=False) |
                 filtered_df["frame"].str.lower().str.contains(search_query, na=False) |
-                filtered_df["matcode"].astype(str).str.lower().str.contains(search_query, na=False)
+                filtered_df["matcode"].str.lower().str.contains(search_query, na=False)
             ]
         
     st.markdown(f"**Showing {len(filtered_df)} Matching Motors**")
@@ -195,17 +165,8 @@ with tab_view:
         
     if not filtered_df.empty:
         display_cols = ["id", "area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
-        
-        formatted_styled_df = (
-            filtered_df[display_cols]
-            .style.apply(highlight_status_column, axis=0)
-            .format({
-                "matcode": safe_decimal_formatter,
-                "kw_hp": safe_decimal_formatter,
-                "current": safe_decimal_formatter
-            })
-        )
-        st.dataframe(formatted_styled_df, use_container_width=True, hide_index=True)
+        # Displays the clean structured data table instantly with zero decimal conversion crash vectors
+        st.dataframe(filtered_df[display_cols].style.apply(highlight_status_column, axis=0), use_container_width=True, hide_index=True)
     else:
         st.info("No records found in database registry matching your active filters.")
 
@@ -215,24 +176,45 @@ with tab_update:
     if df_motors.empty:
         st.warning("Please populate the Master Data Registry first via Tab 3.")
     else:
-        # Build the selector column after replacing any database null spaces with blank text safely
-        df_motors["selector_label"] = "ID " + df_motors["id"].astype(str) + " | Loc: " + df_motors["area"] + " | " + df_motors["equipment"] + " (" + df_motors["drive"] + ")"
+        # Build clean selection menu strings. Since empty values are pre-cleansed, this will never crash.
+        df_motors["selector_label"] = "ID: " + df_motors["id"] + " | Loc: " + df_motors["area"] + " | Eq: " + df_motors["equipment"] + " (" + df_motors["drive"] + ")"
         selected_motor_label = st.selectbox("Select Target Motor to Modify:", df_motors["selector_label"].tolist())
         
-        matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
-        if not matched_rows.empty:
-            selected_row = matched_rows.iloc[0] # Extracted row tuple indexing mapped safely
-            m_id = int(selected_row["id"])
-            m_area = str(selected_row["area"])
-            m_eq = str(selected_row["equipment"])
-            m_drv = str(selected_row["drive"])
-            m_status = str(selected_row["status"])
-            m_remarks = str(selected_row["remarks"])
+        # Safe Positional Slicing matching routines
+        selected_row = df_motors[df_motors["selector_label"] == selected_motor_label].iloc[0]
+        m_id = int(selected_row["id"])
+        
+        st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
+        
+        with st.form("status_update_form"):
+            current_status = selected_row["status"]
+            status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
+            status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
             
-            st.info(f"📍 Modifying: Area {m_area} -> {m_eq} ({m_drv})")
+            new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
+            new_remarks = st.text_area("Field Remarks / Update Log:", value=selected_row["remarks"])
             
-            with st.form("status_update_form"):
-                current_status = m_status if m_status and m_status != "None" and m_status != "" else "Healthy"
-                status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
-                status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
-                
+            submit_status = st.form_submit_button("Submit Operational Status Change")
+            
+        if submit_status:
+            update_motor_status(m_id, "status", new_status)
+            update_motor_status(m_id, "remarks", new_remarks)
+            st.success("Database status appended and successfully committed!")
+            st.rerun()
+
+# ==================== TAB 3: MASTER DATA ENTRY ====================
+with tab_master:
+    st.subheader("Bulk Import via Excel Spreadsheet (.xlsx)")
+    st.markdown("Ensure your Excel columns match these names: **Area, Equipment, Drive, Matcode, Qty, kw/hp, rpm, frame, mount, current, coupling, remarks**")
+    
+    uploaded_excel = st.file_uploader("Upload Motor List Spreadsheet File", type=["xlsx"])
+    
+    if uploaded_excel is not None:
+        excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
+        
+        # Format every uploaded element cleanly into a string to prevent float conversion crashes
+        for col in excel_df.columns:
+            excel_df[col] = excel_df[col].astype(str).replace(['nan', 'NaN', 'None', '<NA>'], '')
+            
+        st.write("📊 Previewing Raw Uploaded Excel Sheet Data Structure:")
+        st.dataframe(excel_df.head(3), use_container_width=True)
