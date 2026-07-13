@@ -102,6 +102,16 @@ def enforce_int_limit(val, max_digits):
     except ValueError:
         return None
 
+def safe_decimal_formatter(val):
+    """Safely forces 2 decimal places only if value can be treated as a number."""
+    if pd.isna(val) or val is None or str(val).strip().lower() in ['nan', 'none', '']:
+        return ""
+    try:
+        numeric_value = float(val)
+        return f"{numeric_value:.2f}"
+    except (ValueError, TypeError):
+        return str(val) # Keeps raw text fallback safely instead of crashing
+
 # --- APP LAYOUT CONFIGURATION ---
 st.set_page_config(page_title="Motor Database Manager", layout="wide")
 init_database()
@@ -158,16 +168,16 @@ with tab_view:
     if not filtered_df.empty:
         display_cols = ["id", "area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
         
-        # --- CRITICAL LAYOUT FIX FOR TWO DECIMAL PLACES DISPLAY ---
-        # This formats matcode, kw_hp, and current to always render with exactly two decimals (.2f)
+        # --- ROBUST 2-DECIMAL VISUAL FORMATTING LAYER ---
+        # Maps our fallback logic wrapper to avoid text-to-float layout crashes
         formatted_styled_df = (
             filtered_df[display_cols]
             .style.apply(highlight_status, axis=1)
             .format({
-                "matcode": "{:.2f}",
-                "kw_hp": "{:.2f}",
-                "current": "{:.2f}"
-            }, na_rep="")
+                "matcode": safe_decimal_formatter,
+                "kw_hp": safe_decimal_formatter,
+                "current": safe_decimal_formatter
+            })
         )
         
         st.dataframe(formatted_styled_df, use_container_width=True, hide_index=True)
@@ -224,12 +234,3 @@ with tab_master:
         excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
         
         st.write("📊 Previewing Raw Uploaded Excel Sheet Data Structure:")
-        st.dataframe(excel_df.head(3), use_container_width=True)
-        
-        if st.button("Confirm Bulk Import into SQLite Engine"):
-            import_counter = 0
-            skipped_counter = 0
-            
-            for index, row in excel_df.iterrows():
-                area_val = str(row.get("Area", row.get("area", ""))).strip()
-                eq_val = str(row.get("Equipment", row.get("equipment", ""))).strip()
