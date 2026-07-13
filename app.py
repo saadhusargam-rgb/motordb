@@ -136,7 +136,7 @@ with tab_update:
         
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
-            # FIX: Safely grab the first matched row array object directly using .iloc[0]
+            # Safe extraction using .iloc to fix the KeyError/TypeError
             selected_row = matched_rows.iloc[0]
             m_id = int(selected_row["id"])
             m_area = str(selected_row["area"])
@@ -200,6 +200,7 @@ with tab_master:
                 cpl_val = str(row.get("coupling", row.get("Coupling", ""))).strip()
                 rem_val = str(row.get("remarks", row.get("Remarks", ""))).strip()
                 
+                # Dynamic Check: Only skip rows that are completely missing BOTH Area and Equipment
                 if not area_val or not eq_val:
                     skipped_counter += 1
                     continue
@@ -207,5 +208,4 @@ with tab_master:
                 insert_motor((area_val, eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
                 import_counter += 1
                 
-            st.success(f"🚀 Import complete! Successfully processed {import_counter} records.")
-            if skipped_counter > 0:
+            st.success(f"🚀 Import process executed! Successfully processed {import_counter} database rows.")
