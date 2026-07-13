@@ -136,14 +136,12 @@ with tab_view:
             use_container_width=True
         )
 
-    # Added 4 columns to fit the Status Filter comfortably side-by-side
     search_col1, search_col2, search_col3, search_col4 = st.columns(4)
     with search_col1:
         area_filter = st.selectbox("Filter by Area / Zone:", ["All"] + sorted(list(df_motors["area"].dropna().unique())) if not df_motors.empty else ["All"])
     with search_col2:
         equipment_filter = st.selectbox("Filter by Equipment Type:", ["All"] + sorted(list(df_motors["equipment"].dropna().unique())) if not df_motors.empty else ["All"])
     with search_col3:
-        # NEW: Operational Status Filter Dropdown
         status_options = ["All", "Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
         status_filter = st.selectbox("Filter by Status:", status_options)
     with search_col4:
@@ -166,10 +164,8 @@ with tab_view:
         
     st.markdown(f"**Showing {len(filtered_df)} Matching Motors**")
     
-    # --- DYNAMIC COLOR CODE STYLING MAP FUNCTION ---
     def highlight_operational_status(row):
         status = str(row['status']).strip()
-        # Define industrial color mappings for backgrounds and crisp text readability
         if status == 'Healthy':
             return ['background-color: #d4edda; color: #155724;'] * len(row)
         elif status == 'Under Observation':
@@ -187,7 +183,7 @@ with tab_view:
         
         formatted_styled_df = (
             filtered_df[display_cols]
-            .style.apply(highlight_operational_status, axis=1) # Applies custom colors to the rows
+            .style.apply(highlight_operational_status, axis=1)
             .format({
                 "matcode": safe_decimal_formatter,
                 "kw_hp": safe_decimal_formatter,
@@ -209,7 +205,7 @@ with tab_update:
         
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
-            selected_row = matched_rows.iloc[0]
+            selected_row = matched_rows.iloc[0] # Extracted cleanly as an array object sequence row slice reference
             m_id = int(selected_row["id"])
             m_area = str(selected_row["area"])
             m_eq = str(selected_row["equipment"])
@@ -219,6 +215,7 @@ with tab_update:
             
             st.info(f"📍 Modifying: Area {m_area} -> {m_eq} ({m_drv})")
             
+            # --- CLEANED STRIPPED SPACING FORM SUBMIT LAYER ---
             with st.form("status_update_form"):
                 up_col1, up_col2 = st.columns(2)
                 with up_col1:
@@ -226,9 +223,12 @@ with tab_update:
                     status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
                     status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
                     new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
-                    
                 with up_col2:
                     current_remarks = m_remarks if m_remarks and m_remarks != "None" else ""
                     new_remarks = st.text_area("Field Remarks / Update Log:", value=current_remarks)
-                    
-                if st.form_submit_button("Submit Operational Status Change"):
+                
+                submit_status = st.form_submit_button("Submit Operational Status Change")
+                
+            if submit_status:
+                update_motor_status(m_id, "status", new_status)
+                update_motor_status(m_id, "remarks", new_remarks)
