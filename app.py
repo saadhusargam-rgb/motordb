@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import io
+import re
 
 # --- DATABASE MANAGEMENT FUNCTIONS ---
 def get_db_connection():
@@ -18,13 +19,13 @@ def init_database():
             area TEXT,
             equipment TEXT,
             drive TEXT,
-            matcode TEXT,
+            matcode REAL,
             qty TEXT,
-            kw_hp TEXT,
-            rpm TEXT,
+            kw_hp REAL,
+            rpm INTEGER,
             frame TEXT,
             mount TEXT,
-            current TEXT,
+            current REAL,
             no_load_current TEXT,
             coupling TEXT,
             status TEXT DEFAULT 'Healthy',
@@ -65,6 +66,48 @@ def convert_df_to_excel(df):
             export_df = export_df.drop(columns=["selector_label"])
         export_df.to_excel(writer, index=False, sheet_name='Motor Registry')
     return buffer.getvalue()
+
+# --- DATA CLEANING & CONSTRAINT UTILITIES ---
+def clean_to_numeric_string(val):
+    """Strips all non-numeric characters except decimal points."""
+    if pd.isna(val) or val is None:
+        return ""
+    cleaned = re.sub(r'[^0-9.]', '', str(val))
+    # Handle edge cases where multiple decimals might exist accidentally
+    if cleaned.count('.') > 1:
+        parts = cleaned.split('.')
+        cleaned = parts[0] + '.' + ''.join(parts[1:])
+    return cleaned
+
+def enforce_float_limit(val, max_digits):
+    """Converts value to a float and limits its total digit length."""
+    cleaned_str = clean_to_numeric_string(val)
+    if not cleaned_str or cleaned_str == ".":
+        return None
+    # Truncate string to match maximum digit allowance safely before conversion
+    no_dot = cleaned_str.replace('.', '')[:max_digits]
+    if '.' in cleaned_str:
+        dot_idx = cleaned_str.index('.')
+        # Re-insert dot relative to truncation window position layout
+        integer_part = cleaned_str[:dot_idx][:max_digits]
+        decimal_part = cleaned_str[dot_idx+1:][:(max_digits - len(integer_part))]
+        final_str = f"{integer_part}.{decimal_part}".strip('.')
+    else:
+        final_str = no_dot
+    try:
+        return float(final_str) if final_str else None
+    except ValueError:
+        return None
+
+def enforce_int_limit(val, max_digits):
+    """Converts value to an integer and limits its total digit length."""
+    cleaned_str = clean_to_numeric_string(val)
+    # Split at decimal point if an float somehow makes it into an integer column row
+    clean_int_str = cleaned_str.split('.')[0][:max_digits]
+    try:
+        return int(clean_int_str) if clean_int_str else None
+    except ValueError:
+        return None
 
 # --- APP LAYOUT CONFIGURATION ---
 st.set_page_config(page_title="Motor Database Manager", layout="wide")
@@ -109,7 +152,7 @@ with tab_view:
             filtered_df = filtered_df[
                 filtered_df["drive"].str.lower().str.contains(search_query, na=False) |
                 filtered_df["frame"].str.lower().str.contains(search_query, na=False) |
-                filtered_df["matcode"].str.lower().str.contains(search_query, na=False)
+                filtered_df["matcode"].astype(str).str.lower().str.contains(search_query, na=False)
             ]
         
     st.markdown(f"**Showing {len(filtered_df)} Matching Motors**")
@@ -136,7 +179,6 @@ with tab_update:
         
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
-            # Safe extraction using .iloc to fix the KeyError/TypeError
             selected_row = matched_rows.iloc[0]
             m_id = int(selected_row["id"])
             m_area = str(selected_row["area"])
@@ -175,11 +217,8 @@ with tab_master:
     if uploaded_excel is not None:
         excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
         
-        for col in excel_df.columns:
-            excel_df[col] = excel_df[col].astype(str).replace(['nan', 'NaN', 'None', '<NA>'], '')
-        
         st.write("📊 Previewing Raw Uploaded Excel Sheet Data Structure:")
-        st.dataframe(excel_df, use_container_width=True)
+        st.dataframe(excel_df.head(3), use_container_width=True)
         
         if st.button("Confirm Bulk Import into SQLite Engine"):
             import_counter = 0
@@ -187,25 +226,3 @@ with tab_master:
             
             for index, row in excel_df.iterrows():
                 area_val = str(row.get("Area", row.get("area", ""))).strip()
-                eq_val = str(row.get("Equipment", row.get("equipment", ""))).strip()
-                drv_val = str(row.get("Drive", row.get("drive", ""))).strip()
-                mat_val = str(row.get("Matcode", row.get("matcode", ""))).strip()
-                qty_val = str(row.get("Qty", row.get("qty", ""))).strip()
-                kw_val = str(row.get("kw/hp", row.get("kw_hp", ""))).strip()
-                rpm_val = str(row.get("rpm", row.get("RPM", ""))).strip()
-                frame_val = str(row.get("frame", row.get("Frame", ""))).strip()
-                mount_val = str(row.get("mount", row.get("Mount", ""))).strip()
-                curr_val = str(row.get("current", row.get("Current", ""))).strip()
-                nl_curr_val = str(row.get("no_load_current", "")).strip()
-                cpl_val = str(row.get("coupling", row.get("Coupling", ""))).strip()
-                rem_val = str(row.get("remarks", row.get("Remarks", ""))).strip()
-                
-                # Dynamic Check: Only skip rows that are completely missing BOTH Area and Equipment
-                if not area_val or not eq_val:
-                    skipped_counter += 1
-                    continue
-                
-                insert_motor((area_val, eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
-                import_counter += 1
-                
-            st.success(f"🚀 Import process executed! Successfully processed {import_counter} database rows.")
