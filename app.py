@@ -87,7 +87,7 @@ tab_view, tab_update, tab_master = st.tabs(["🔍 Search & View", "⚙️ Field 
 
 # ==================== TAB 1: EASY SEARCH & VIEW ====================
 with tab_view:
-    export_col1, export_col2 = st.columns()
+    export_col1, export_col2 = st.columns(2)
     with export_col1:
         st.subheader("Quick Search Filter")
     with export_col2:
