@@ -131,24 +131,31 @@ with tab_update:
     if df_motors.empty:
         st.warning("Please populate the Master Data Registry first via Tab 3.")
     else:
+        # Create clear selectors for technician field tasks
         df_motors["selector_label"] = "ID " + df_motors["id"].astype(str) + " | Loc: " + df_motors["area"].astype(str) + " | " + df_motors["equipment"].astype(str) + " (" + df_motors["drive"].astype(str) + ")"
         selected_motor_label = st.selectbox("Select Target Motor to Modify:", df_motors["selector_label"].tolist())
         
-        selected_row = df_motors[df_motors["selector_label"] == selected_motor_label].iloc
-        m_id = int(selected_row["id"])
+        # FIX: Extract row data dictionary structure directly using index matching safely
+        selected_idx = df_motors[df_motors["selector_label"] == selected_motor_label].index[0]
+        m_id = int(df_motors.at[selected_idx, "id"])
+        m_area = str(df_motors.at[selected_idx, "area"])
+        m_eq = str(df_motors.at[selected_idx, "equipment"])
+        m_drv = str(df_motors.at[selected_idx, "drive"])
+        m_status = str(df_motors.at[selected_idx, "status"])
+        m_remarks = str(df_motors.at[selected_idx, "remarks"])
         
-        st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
+        st.info(f"📍 Modifying: Area {m_area} -> {m_eq} ({m_drv})")
         
         with st.form("status_update_form"):
             up_col1, up_col2 = st.columns(2)
             with up_col1:
-                current_status = selected_row["status"] if pd.notna(selected_row["status"]) else "Healthy"
+                current_status = m_status if m_status and m_status != "None" else "Healthy"
                 status_options = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
                 status_idx = status_options.index(current_status) if current_status in status_options else 0
                 new_status = st.selectbox("Operational Status:", status_options, index=status_idx)
                 
             with up_col2:
-                current_remarks = selected_row["remarks"] if pd.notna(selected_row["remarks"]) else ""
+                current_remarks = m_remarks if m_remarks and m_remarks != "None" else ""
                 new_remarks = st.text_area("Field Remarks / Update Log:", value=current_remarks)
                 
             if st.form_submit_button("Submit Operational Status Change"):
@@ -167,7 +174,6 @@ with tab_master:
     if uploaded_excel is not None:
         excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
         
-        # Clean missing spreadsheet inputs automatically
         for col in excel_df.columns:
             if col.lower() in ['qty', 'quantity']:
                 excel_df[col] = pd.to_numeric(excel_df[col], errors='coerce').fillna(1)
@@ -200,11 +206,3 @@ with tab_master:
                     rem_val = "Imported via Excel"
                 
                 insert_motor((area_val, eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
-                import_counter += 1
-            
-            st.success(f"🚀 Successfully imported {import_counter} motor records into your active ledger!")
-            st.rerun()
-                
-    st.markdown("---")
-    st.subheader("Alternative: Add Single Motor Asset Manually")
-    
