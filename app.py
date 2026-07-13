@@ -12,25 +12,21 @@ st.markdown("All updates made here or directly on the Google Sheet sync both way
 # --- INITIALIZE LIVE GOOGLE SHEETS CONNECTION ---
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # Target "Sheet1" explicitly to clear out the persistent background Not Found errors
     df_motors = conn.read(worksheet="Sheet1", ttl=2)
 except Exception as e:
     st.error(f"Failed to connect to Google Drive Sheet. Verify your connection link tokens in Secrets. Error: {e}")
     st.stop()
 
-# Auto-detect column naming structures and map lowercase versions for layout safety
+# Standardize columns to lowercase for application stability
 if not df_motors.empty:
     df_motors.columns = [str(c).lower().strip() for c in df_motors.columns]
-    
-    # Fill missing value empty spaces with clear blank elements
     for col in df_motors.columns:
         df_motors[col] = df_motors[col].fillna("").astype(str).str.strip()
-    
     if "status" not in df_motors.columns:
         df_motors["status"] = "Healthy"
     df_motors["status"] = df_motors["status"].replace("", "Healthy")
 else:
-    st.warning("⚠️ **Data Structural Error:** Connected successfully, but your worksheet table contains zero data rows or headers.")
+    st.warning("⚠️ Data Structural Error: Connected successfully, but worksheet contains no rows.")
     st.stop()
 
 # --- UTILITIES ---
@@ -40,7 +36,7 @@ def sanitize_digits(val, max_digits):
     cleaned = re.sub(r'[^0-9.]', '', str(val).strip())
     if "." in cleaned:
         parts = cleaned.split('.')
-        integer_part = parts[:max_digits]
+        integer_part = parts[0][:max_digits]
         decimal_part = "".join(parts[1:])[:2]
         return f"{integer_part}.{decimal_part}".strip('.')
     return cleaned[:max_digits]
@@ -59,7 +55,6 @@ tab_view, tab_update, tab_master = st.tabs(["🔍 Search & View Live Fleet", "�
 # ==================== TAB 1: LIVE SEARCH & VIEW ====================
 with tab_view:
     st.subheader("Quick Search Filter")
-    
     search_col1, search_col2, search_col3, search_col4 = st.columns(4)
     with search_col1:
         area_filter = st.selectbox("Filter by Area / Zone:", ["All"] + sorted(list(df_motors["area"].unique())))
@@ -104,7 +99,6 @@ with tab_view:
         
     if not filtered_df.empty:
         display_cols = [c for col in ["area", "equipment", "drive", "matcode", "qty", "kw/hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"] if (c:=col) in filtered_df.columns]
-        
         formatted_styled_df = (
             filtered_df[display_cols]
             .style.apply(highlight_status_column, axis=0)
@@ -129,7 +123,7 @@ with tab_update:
         
         matched_indices = df_motors[df_motors["selector_label"] == selected_motor_label].index
         if len(matched_indices) > 0:
-            target_idx = matched_indices
+            target_idx = matched_indices[0]
             selected_row = df_motors.loc[target_idx]
             
             st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
@@ -138,20 +132,15 @@ with tab_update:
                 current_status = selected_row["status"]
                 status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
                 status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
-                
                 new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
                 new_remarks = st.text_area("Field Remarks / Update Log:", value=selected_row["remarks"])
-                
                 submit_status = st.form_submit_button("Submit & Write-Back to Google Drive")
                 
             if submit_status:
-                df_motors.loc[target_idx, "status"] = new_status
-                df_motors.loc[target_idx, "remarks"] = new_remarks
-                
+                df_motors.at[target_idx, "status"] = new_status
+                df_motors.at[target_idx, "remarks"] = new_remarks
                 if "selector_label" in df_motors.columns:
                     df_motors = df_motors.drop(columns=["selector_label"])
-                
-                # Write back targeting Sheet1 explicitly
                 conn.update(worksheet="Sheet1", data=df_motors)
                 st.success("✅ Change committed! Google Sheet updated in real time.")
                 st.rerun()
@@ -168,7 +157,7 @@ with tab_master:
         mat_in = st.text_input("Matcode (Max 12 digits)")
         
         st.markdown("##### ⚙️ Technical Design Parameters")
-        qty = st.text_input("Quantity", value="1")
+        qty_in = st.text_input("Quantity", value="1")
         kw_in = st.text_input("Power Rating kw/hp (Max 6 digits)")
         rpm_in = st.text_input("RPM Speed (Max 5 digits)")
         frm = st.text_input("Frame Dimension Size")
@@ -188,15 +177,18 @@ with tab_master:
             if not area_input or not eq:
                 st.error("Validation Error: 'Area' and 'Equipment Name' are required fields.")
             else:
+                # Apply validation constraints cleanly
                 matcode_val = sanitize_digits(mat_in, max_digits=12)
                 current_val = sanitize_digits(curr_in, max_digits=6)
                 kw_val = sanitize_digits(kw_in, max_digits=6)
                 rpm_val = sanitize_digits(rpm_in, max_digits=5)
                 
-                # FIXED: Fully closed layout dictionary structures resolve the line 196 SyntaxError
-                row_data = {
-                    "area": area_input,
-                    "equipment": eq,
-                    "drive": drv,
-                    "matcode": matcode_val,
-                    "qty": qty,
+                # RESTRUCTURED LOGIC: Builds the next row index position directly 
+                # inside the master dataframe array, completely removing curly braces.
+                next_index = len(df_motors)
+                
+                df_motors.at[next_index, "area"] = str(area_input).strip()
+                df_motors.at[next_index, "equipment"] = str(eq).strip()
+                df_motors.at[next_index, "drive"] = str(drv).strip()
+                df_motors.at[next_index, "matcode"] = matcode_val
+                df_motors.at[next_index, "qty"] = str(qty_in).strip()
