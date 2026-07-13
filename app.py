@@ -21,7 +21,7 @@ def init_database():
             matcode TEXT,
             qty INTEGER DEFAULT 1,
             kw_hp REAL,
-            rpm TEXT,  -- Changed to TEXT to accept values like 125/145D safely
+            rpm INTEGER,
             frame TEXT,
             mount TEXT,
             current REAL,
@@ -32,7 +32,8 @@ def init_database():
         )
     """)
     cursor.execute("PRAGMA table_info(motor_registry)")
-    columns = [row for row in cursor.fetchall()]
+    # Corrected extraction logic to read the column name string parameter cleanly
+    columns = [row[1] for row in cursor.fetchall()]
     if "area" not in columns:
         cursor.execute("ALTER TABLE motor_registry ADD COLUMN area TEXT")
     conn.commit()
@@ -183,10 +184,7 @@ with tab_master:
                     mat_val = str(row.get("Matcode", row.get("matcode", "")))
                     qty_val = int(row.get("Qty", row.get("qty", 1)))
                     kw_val = float(row.get("kw/hp", row.get("kw_hp", 0.0)))
-                    
-                    # Convert RPM column into a flexible text field type mapping format safely
-                    rpm_val = str(row.get("rpm", row.get("RPM", "1440")))
-                    
+                    rpm_val = int(row.get("rpm", row.get("RPM", 1440)))
                     frame_val = str(row.get("frame", row.get("Frame", "")))
                     mount_val = str(row.get("mount", row.get("Mount", "foot")))
                     curr_val = float(row.get("current", row.get("Current", 0.0)))
@@ -206,4 +204,6 @@ with tab_master:
     st.markdown("---")
     st.subheader("Alternative: Add Single Motor Asset Manually")
     
-    area_input = st.text_input("Area / Shop / Zone Location (e.g., Fce #2, Raw Mill)", key="man_area")
+    with st.form("manual_entry_form", clear_on_submit=True):
+        area_input = st.text_input("Area / Shop / Zone Location (e.g., Fce #2, Raw Mill)")
+        eq = st.text_input("Equipment (e.g., Air Compressor)")
