@@ -10,10 +10,7 @@ st.markdown("All updates made here or directly on the Google Sheet sync both way
 
 # --- INITIALIZE NATIVE DIRECT STREAM CONNECTION ---
 try:
-    # Safely fetch the raw public CSV link string from your secrets dashboard panel
     csv_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-    
-    # Direct network pipeline bypasses the sheet library engine to load the 208 motors instantly
     df_raw = pd.read_csv(csv_url)
 except Exception as e:
     st.error(f"Failed to fetch public stream from Google Drive. Verify your Secrets link configuration. Error: {e}")
@@ -43,7 +40,8 @@ if not df_raw.empty:
         
     if "status" not in df_motors.columns:
         df_motors["status"] = "Healthy"
-    df_motors["status"] = df_motors["status"].replace("", "Healthy")
+    # Normalize default status fields
+    df_motors["status"] = df_motors["status"].replace(["", "nan", "None"], "Healthy")
 else:
     st.warning("⚠️ Data Structural Error: Connected successfully, but your worksheet contains zero rows of data.")
     st.stop()
@@ -136,28 +134,32 @@ with tab_view:
 # ==================== TAB 2: FIELD STATUS UPDATE ====================
 with tab_update:
     st.subheader("Append / Edit Status & Remarks")
-    st.info("💡 **💡 Read-Only Link Active:** Two-way writeback requires an API service token configuration. You can view your real-time fleet adjustments here.")
+    st.info("💡 **Read-Only Link Active:** Two-way writeback requires an API service token configuration. You can view your real-time fleet adjustments here.")
     
     if df_motors.empty:
         st.warning("Please populate your Google Sheet rows first.")
     else:
-        df_motors["selector_label"] = "Loc: " + df_motors["area"] + " | Eq: " + df_motors["equipment"] + " (" + df_motors["drive"] + ")"
+        # FIX: Formulate a unique label using the absolute row index number (+2 to match Google Sheets row numbering layout)
+        # This completely bypasses the duplicate row value error crashes
+        df_motors["row_id"] = df_motors.index + 2
+        df_motors["selector_label"] = "[Row " + df_motors["row_id"].astype(str) + "] Loc: " + df_motors["area"] + " | Eq: " + df_motors["equipment"] + " (" + df_motors["drive"] + ")"
+        
         selected_motor_label = st.selectbox("Select Target Motor to Modify:", df_motors["selector_label"].tolist())
         
-        matched_indices = df_motors[df_motors["selector_label"] == selected_motor_label].index
-        if len(matched_indices) > 0:
-            target_idx = matched_indices
-            selected_row = df_motors.loc[target_idx]
+        matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
+        if not matched_rows.empty:
+            # FIX: Grab the atomic row object cleanly using an explicit positional selector (.iloc[0])
+            selected_row = matched_rows.iloc[0]
             
-            st.info(f"📍 Selected Asset: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
+            st.info(f"📍 Selected Asset: Row {selected_row['row_id']} | Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
             
             with st.form("status_update_form"):
-                current_status = selected_row["status"]
+                current_status = str(selected_row["status"]).strip()
                 status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
                 status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
                 
                 new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
-                new_remarks = st.text_area("Field Remarks / Update Log:", value=selected_row["remarks"])
+                new_remarks = st.text_area("Field Remarks / Update Log:", value=str(selected_row["remarks"]))
                 
                 st.form_submit_button("Submit Modifications (Disabled in Read-Only Mode)")
 
