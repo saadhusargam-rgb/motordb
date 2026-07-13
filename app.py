@@ -12,7 +12,6 @@ def get_db_connection():
 def init_database():
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Unique constraint on "drive" prevents accidental duplicate insertions
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS motor_registry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,7 +43,6 @@ def load_motor_data():
 def insert_motor(data_tuple):
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Safe insertion: ignores duplicates based on Drive name
     cursor.execute("""
         INSERT OR IGNORE INTO motor_registry (area, equipment, drive, matcode, qty, kw_hp, rpm, frame, mount, current, no_load_current, coupling, status, remarks)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -133,11 +131,9 @@ with tab_update:
     if df_motors.empty:
         st.warning("Please populate the Master Data Registry first via Tab 3.")
     else:
-        # Create robust key strings using native dataframe index locations
         df_motors["selector_label"] = "ID " + df_motors["id"].astype(str) + " | Loc: " + df_motors["area"].astype(str) + " | " + df_motors["equipment"].astype(str) + " (" + df_motors["drive"].astype(str) + ")"
         selected_motor_label = st.selectbox("Select Target Motor to Modify:", df_motors["selector_label"].tolist())
         
-        # Get target row values accurately
         matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
         if not matched_rows.empty:
             selected_row = matched_rows.iloc[0]
@@ -153,7 +149,7 @@ with tab_update:
             with st.form("status_update_form"):
                 up_col1, up_col2 = st.columns(2)
                 with up_col1:
-                    current_status = m_status if m_status and m_status != "None" else "Healthy"
+                    current_status = m_status if m_status and m_status != "None" and m_status != "" else "Healthy"
                     status_options = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
                     status_idx = status_options.index(current_status) if current_status in status_options else 0
                     new_status = st.selectbox("Operational Status:", status_options, index=status_idx)
@@ -203,7 +199,12 @@ with tab_master:
                 mount_val = str(row.get("mount", row.get("Mount", "foot"))).strip()
                 curr_val = float(row.get("current", row.get("Current", 0.0)))
                 nl_curr_val = float(row.get("no_load_current", 0.0))
-                cpl_val = str(row.get("coupling", row.get("Coupling", ""))).strip()
-                rem_val = str(row.get("remarks", row.get("Remarks", "Imported via Excel"))).strip()
                 
-                if rem_val == "":
+                # Streamlined default clean formatting step
+                rem_val = str(row.get("remarks", row.get("Remarks", ""))).strip()
+                if not rem_val:
+                    rem_val = "Imported via Excel"
+                
+                insert_motor((area_val, eq_val, drv_val, mat_val, qty_val, kw_val, rpm_val, frame_val, mount_val, curr_val, nl_curr_val, cpl_val, "Healthy", rem_val))
+                import_counter += 1
+                
