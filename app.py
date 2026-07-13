@@ -13,7 +13,6 @@ def get_db_connection():
 def init_database():
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Flexible column schemas guarantee zero data-type conversion lockups on database loading sequences
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS motor_registry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,12 +40,9 @@ def load_motor_data():
     df = pd.read_sql_query("SELECT * FROM motor_registry", conn)
     conn.close()
     
-    # Absolute Data Sanitizer: Converts all database text data cleanly, 
-    # ensuring text values and spaces never break selection calculations or UI grids
     if not df.empty:
         for col in df.columns:
             df[col] = df[col].fillna("").astype(str).str.strip()
-        # Clean default fallbacks for unpopulated statuses
         df["status"] = df["status"].replace("", "Healthy")
     return df
 
@@ -76,17 +72,19 @@ def convert_df_to_excel(df):
         export_df.to_excel(writer, index=False, sheet_name='Motor Registry')
     return buffer.getvalue()
 
-# --- INPUT SANITIZATION UTILITIES (TAB 3 LENGTH CONSTRAINTS) ---
-def sanitize_digits(val, max_digits):
+# --- INPUT SANITIZATION UTILITIES ---
+def sanitize_digits(val, max_digits, is_int=False):
     """Strips formatting and restricts numeric digit arrays to strict length metrics."""
-    if not val:
+    if pd.isna(val) or val is None or str(val).strip().lower() in ['nan', 'none', '']:
         return ""
-    # Strip any characters that aren't numbers or a decimal point
-    cleaned = re.sub(r'[^0-9.]', '', str(val))
+    cleaned = re.sub(r'[^0-9.]', '', str(val).strip())
+    if is_int:
+        cleaned = cleaned.split('.')[0]
+        return cleaned[:max_digits]
     if "." in cleaned:
         parts = cleaned.split('.')
         integer_part = parts[0][:max_digits]
-        decimal_part = "".join(parts[1:])[:2] # Limits to 2 decimals
+        decimal_part = "".join(parts[1:])[:2]
         return f"{integer_part}.{decimal_part}".strip('.')
     return cleaned[:max_digits]
 
@@ -165,7 +163,6 @@ with tab_view:
         
     if not filtered_df.empty:
         display_cols = ["id", "area", "equipment", "drive", "matcode", "qty", "kw_hp", "rpm", "frame", "mount", "current", "no_load_current", "coupling", "status", "remarks"]
-        # Displays the clean structured data table instantly with zero decimal conversion crash vectors
         st.dataframe(filtered_df[display_cols].style.apply(highlight_status_column, axis=0), use_container_width=True, hide_index=True)
     else:
         st.info("No records found in database registry matching your active filters.")
@@ -176,31 +173,31 @@ with tab_update:
     if df_motors.empty:
         st.warning("Please populate the Master Data Registry first via Tab 3.")
     else:
-        # Build clean selection menu strings. Since empty values are pre-cleansed, this will never crash.
         df_motors["selector_label"] = "ID: " + df_motors["id"] + " | Loc: " + df_motors["area"] + " | Eq: " + df_motors["equipment"] + " (" + df_motors["drive"] + ")"
         selected_motor_label = st.selectbox("Select Target Motor to Modify:", df_motors["selector_label"].tolist())
         
-        # Safe Positional Slicing matching routines
-        selected_row = df_motors[df_motors["selector_label"] == selected_motor_label].iloc[0]
-        m_id = int(selected_row["id"])
-        
-        st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
-        
-        with st.form("status_update_form"):
-            current_status = selected_row["status"]
-            status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
-            status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
+        matched_rows = df_motors[df_motors["selector_label"] == selected_motor_label]
+        if not matched_rows.empty:
+            selected_row = matched_rows.iloc[0]
+            m_id = int(selected_row["id"])
             
-            new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
-            new_remarks = st.text_area("Field Remarks / Update Log:", value=selected_row["remarks"])
+            st.info(f"📍 Modifying: Area {selected_row['area']} -> {selected_row['equipment']} ({selected_row['drive']})")
             
-            submit_status = st.form_submit_button("Submit Operational Status Change")
-            
-        if submit_status:
-            update_motor_status(m_id, "status", new_status)
-            update_motor_status(m_id, "remarks", new_remarks)
-            st.success("Database status appended and successfully committed!")
-            st.rerun()
+            with st.form("status_update_form"):
+                current_status = selected_row["status"]
+                status_options_edit = ["Healthy", "Under Observation", "Under Maintenance", "Breakdown", "Spare/Scrapped"]
+                status_idx = status_options_edit.index(current_status) if current_status in status_options_edit else 0
+                
+                new_status = st.selectbox("Operational Status:", status_options_edit, index=status_idx)
+                new_remarks = st.text_area("Field Remarks / Update Log:", value=selected_row["remarks"])
+                
+                submit_status = st.form_submit_button("Submit Operational Status Change")
+                
+            if submit_status:
+                update_motor_status(m_id, "status", new_status)
+                update_motor_status(m_id, "remarks", new_remarks)
+                st.success("Database status appended and successfully committed!")
+                st.rerun()
 
 # ==================== TAB 3: MASTER DATA ENTRY ====================
 with tab_master:
@@ -212,9 +209,17 @@ with tab_master:
     if uploaded_excel is not None:
         excel_df = pd.read_excel(uploaded_excel, engine="openpyxl")
         
-        # Format every uploaded element cleanly into a string to prevent float conversion crashes
         for col in excel_df.columns:
             excel_df[col] = excel_df[col].astype(str).replace(['nan', 'NaN', 'None', '<NA>'], '')
             
         st.write("📊 Previewing Raw Uploaded Excel Sheet Data Structure:")
         st.dataframe(excel_df.head(3), use_container_width=True)
+        
+        if st.button("Confirm Bulk Import into SQLite Engine"):
+            import_counter = 0
+            skipped_counter = 0
+            
+            for index, row in excel_df.iterrows():
+                area_val = str(row.get("Area", row.get("area", ""))).strip()
+                eq_val = str(row.get("Equipment", row.get("equipment", ""))).strip()
+                drv_val = str(row.get("Drive", row.get("drive", ""))).strip()
